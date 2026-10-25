@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ro" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="theme-color" content="#04080f">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>JARVIS Android V2</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/css/jarvis.css">
+</head>
+<body>
+<noscript class="noscript">JARVIS needs JavaScript enabled.</noscript>
+
+<div id="app" class="app" data-view="chat" data-power="active">
+
+  <!-- ===================== top bar ===================== -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name" data-i18n="app.title">JARVIS</span>
+      <span class="brand-sub" data-i18n="app.subtitle">Android V2</span>
+    </div>
+
+    <div class="topbar-actions">
+      <label class="lang-picker" data-i18n-title="settings.uiLanguage">
+        <span class="lang-globe" aria-hidden="true">◍</span>
+        <select id="lang-quick" data-i18n-aria="settings.uiLanguage"></select>
+      </label>
+      <button class="icon-btn" id="btn-open-settings" type="button"
+              data-i18n-aria="settings.title" data-i18n-title="settings.title">⚙</button>
+    </div>
+  </header>
+
+  <!-- ============ connection status (own row, scrollable) ============ -->
+  <div class="statusbar" id="status-chips" role="status" aria-live="polite"></div>
+
+  <!-- ===================== main menu ===================== -->
+  <nav class="mainmenu" id="mainmenu" aria-label="JARVIS">
+    <button class="menu-btn is-active" type="button" data-view="chat">
+      <span class="menu-ico" aria-hidden="true">◈</span><span data-i18n="nav.chat">Chat</span>
+    </button>
+    <button class="menu-btn" type="button" data-view="armory">
+      <span class="menu-ico" aria-hidden="true">⬡</span><span data-i18n="nav.armory">Tool Armory</span>
+    </button>
+    <button class="menu-btn" type="button" data-view="eyes">
+      <span class="menu-ico" aria-hidden="true">◉</span><span data-i18n="nav.eyes">Eyes</span>
+    </button>
+    <button class="menu-btn" type="button" data-view="settings">
+      <span class="menu-ico" aria-hidden="true">⚙</span><span data-i18n="nav.settings">Settings</span>
+    </button>
+  </nav>
+
+  <!-- ============ magnifier row (left, horizontal) ============ -->
+  <div class="subbar">
+    <div class="magnifier" id="magnifier" data-i18n-title="magnifier.label">
+      <svg class="mag-wedge" viewBox="0 0 160 34" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="magGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#0e3d57"/>
+            <stop offset="100%" stop-color="#36e6ff"/>
+          </linearGradient>
+        </defs>
+        <!-- horizontal wedge: thin at 100%, thick at max zoom -->
+        <polygon class="mag-wedge-fill" points="2,20 158,4 158,30 2,24" fill="url(#magGrad)"/>
+        <polygon class="mag-wedge-line" points="2,20 158,4 158,30 2,24" fill="none"/>
+      </svg>
+      <input class="mag-range" id="mag-range" type="range" min="85" max="150" step="5" value="100"
+             data-i18n-aria="magnifier.label">
+      <span class="mag-glyph" aria-hidden="true">⌕</span>
+      <span class="mag-value" id="mag-value">100%</span>
+      <button class="mag-reset" id="mag-reset" type="button"
+              data-i18n-title="magnifier.reset" data-i18n-aria="magnifier.reset">↺</button>
+    </div>
+
+    <div class="activity-pill" id="activity-pill">
+      <span class="activity-dot" aria-hidden="true"></span>
+      <span id="activity-label" data-i18n="activity.idle">Standing by</span>
+    </div>
+  </div>
+
+  <!-- ===================== avatar stage ===================== -->
+  <main class="stage" id="stage">
+    <canvas id="avatar-canvas" class="avatar-canvas" aria-hidden="true"></canvas>
+
+    <div class="avatar-switch" id="avatar-switch" role="group" data-i18n-aria="avatar.mode">
+      <button type="button" class="av-btn is-active" data-mode="rings" data-i18n="avatar.rings">Rings</button>
+      <button type="button" class="av-btn" data-mode="face" data-i18n="avatar.face">Face</button>
+    </div>
+
+    <div class="standby-veil" id="standby-veil" hidden>
+      <div class="standby-box">
+        <div class="standby-title" data-i18n="power.standby">Standby</div>
+        <p class="standby-text" data-i18n="power.inStandby"></p>
+        <p class="standby-hint" data-i18n="power.resumeHint"></p>
+        <button class="btn btn-primary" id="btn-resume" type="button" data-i18n="power.resume">Resume</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================== panels ===================== -->
+  <section class="panel panel-chat" id="panel-chat" data-panel="chat">
+    <div class="panel-head">
+      <h2 data-i18n="nav.chat">Chat</h2>
+      <div class="panel-head-actions">
+        <button class="btn btn-ghost" id="btn-history" type="button" data-i18n="chat.history">History</button>
+        <button class="btn btn-ghost" id="btn-new-chat" type="button" data-i18n="chat.new">New</button>
+      </div>
+    </div>
+    <div class="messages" id="messages" aria-live="polite">
+      <p class="empty" data-i18n="chat.empty"></p>
+    </div>
+    <div class="history-list" id="history-list" hidden></div>
+    <form class="composer" id="composer" autocomplete="off">
+      <textarea id="chat-input" rows="1" data-i18n-placeholder="chat.placeholder"></textarea>
+      <button class="btn btn-primary" id="btn-send" type="submit" data-i18n="chat.send">Send</button>
+      <button class="btn btn-danger" id="btn-stop" type="button" hidden data-i18n="chat.stop">Stop</button>
+    </form>
+  </section>
+
+  <section class="panel panel-armory" id="panel-armory" data-panel="armory" hidden>
+    <div class="panel-head">
+      <h2 data-i18n="armory.title">Tool Armory</h2>
+      <button class="btn btn-primary" id="btn-add-conn" type="button" data-i18n="armory.add">Add</button>
+    </div>
+    <p class="panel-sub" data-i18n="armory.subtitle"></p>
+    <div class="conn-list" id="conn-list"></div>
+    <div class="conn-form" id="conn-form" hidden></div>
+  </section>
+
+  <section class="panel panel-eyes" id="panel-eyes" data-panel="eyes" hidden>
+    <div class="panel-head">
+      <h2 data-i18n="eyes.title">Eyes</h2>
+      <span class="cam-indicator" id="cam-indicator" hidden>
+        <span class="cam-dot" aria-hidden="true"></span><span data-i18n="eyes.on">Camera on</span>
+      </span>
+    </div>
+    <div class="cam-wrap">
+      <video id="cam-video" playsinline muted autoplay></video>
+      <div class="cam-off" id="cam-off" data-i18n="eyes.off">Camera off</div>
+    </div>
+    <div class="cam-controls">
+      <button class="btn btn-primary" id="btn-cam-start" type="button" data-i18n="eyes.start">Start</button>
+      <button class="btn btn-danger" id="btn-cam-stop" type="button" hidden data-i18n="eyes.stop">Stop</button>
+      <button class="btn btn-ghost" id="btn-cam-switch" type="button" hidden data-i18n="eyes.switch">Switch</button>
+      <button class="btn btn-ghost" id="btn-cam-describe" type="button" hidden data-i18n="eyes.describe">Describe</button>
+    </div>
+    <p class="cam-note" id="cam-note"></p>
+    <div class="cam-result" id="cam-result" hidden></div>
+  </section>
+
+  <section class="panel panel-settings" id="panel-settings" data-panel="settings" hidden>
+    <div class="panel-head">
+      <h2 data-i18n="settings.title">Settings</h2>
+      <span class="saved-flag" id="saved-flag" hidden data-i18n="settings.saved"></span>
+    </div>
+    <div class="settings-body" id="settings-body"></div>
+  </section>
+
+  <!-- ===================== bottom controls ===================== -->
+  <footer class="controls">
+    <button class="ctl ctl-mic is-muted" id="btn-mic" type="button" aria-pressed="false">
+      <span class="ctl-dot" aria-hidden="true"></span>
+      <span class="ctl-label" id="mic-label" data-i18n="mic.mute">Mute</span>
+    </button>
+    <button class="ctl ctl-power is-active" id="btn-power" type="button" aria-pressed="true">
+      <span class="ctl-dot" aria-hidden="true"></span>
+      <span class="ctl-label" id="power-label" data-i18n="power.active">Active</span>
+    </button>
+    <button class="ctl ctl-exit" id="btn-exit" type="button">
+      <span class="ctl-label" data-i18n="power.exit">Exit</span>
+    </button>
+  </footer>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
