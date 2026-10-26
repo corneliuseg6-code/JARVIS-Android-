@@ -63,6 +63,14 @@ export default class Modes {
     // FOCUS
     this.focus = null;
     this.focusTimer = 0;
+    this.focusNoteTimer = 0;
+    this.focusBlock = document.getElementById('focus-block');
+    this.focusTimeEl = document.getElementById('focus-time');
+    this.focusDriftEl = document.getElementById('focus-drift');
+    this.focusPauseBtn = document.getElementById('btn-focus-pause');
+    this.focusPauseBtn?.addEventListener('click', () => this.toggleFocusPause());
+    document.getElementById('btn-focus-stop')
+      ?.addEventListener('click', () => this.set('focus', false, 'user'));
 
     for (const name of FUNCTIONS) {
       const button = document.getElementById('fn-' + name);
@@ -312,10 +320,20 @@ export default class Modes {
       const session = this.focus;
       this.focus = null;
       if (this.focusTimer) { clearInterval(this.focusTimer); this.focusTimer = 0; }
+      if (this.focusBlock) this.focusBlock.hidden = true;
+      document.getElementById('app')?.removeAttribute('data-focus');
       if (session && reason !== 'standby' && reason !== 'pagehide') {
-        const minutes = Math.round((Date.now() - session.start) / 60000);
+        const paused = session.paused + (session.pausedAt ? Date.now() - session.pausedAt : 0);
+        const minutes = Math.round((Date.now() - session.start - paused) / 60000);
         const line = t('fn.focusDone', { minutes, drifts: session.drifts });
         this._note(line);
+        // The summary is news, not a permanent caption: it sits over the
+        // visualiser, so take it away once it has been read.
+        clearTimeout(this.focusNoteTimer);
+        this.focusNoteTimer = setTimeout(() => {
+          const note = document.getElementById('stage-note');
+          if (!note || note.textContent === line) this._note('');
+        }, 8000);
         this.voice?.speak(line, (state.get('config') || {}).conversation_language);
       } else {
         this._note('');
@@ -325,7 +343,18 @@ export default class Modes {
 
     const cfg = state.get('config') || {};
     const minutes = Math.max(1, Math.min(240, Number(cfg.focus_minutes) || 30));
-    this.focus = { start: Date.now(), until: Date.now() + minutes * 60000, drifts: 0, away: 0 };
+    this.focus = {
+      start: Date.now(),
+      until: Date.now() + minutes * 60000,
+      drifts: 0,
+      away: 0,
+      pausedAt: 0,
+      paused: 0,
+      noteUntil: 0,
+    };
+    clearTimeout(this.focusNoteTimer);
+    this._note('');
+    this._focusPauseUI(false);
     this._tickFocus();
     this.focusTimer = setInterval(() => this._tickFocus(), 1000);
     const line = t('fn.focusOn', { minutes });
@@ -333,9 +362,43 @@ export default class Modes {
     return true;
   }
 
+  /**
+   * Pause the clock without ending the session.
+   *
+   * The deadline is pushed out by however long the pause lasted, so the
+   * session still runs for the full time it was asked for.
+   */
+  toggleFocusPause() {
+    if (!this.focus) return;
+    if (this.focus.pausedAt) {
+      const held = Date.now() - this.focus.pausedAt;
+      this.focus.until += held;
+      this.focus.paused += held;
+      this.focus.pausedAt = 0;
+    } else {
+      this.focus.pausedAt = Date.now();
+      this.focus.away = 0;
+    }
+    this._focusPauseUI(!!this.focus.pausedAt);
+    this._tickFocus();
+  }
+
+  _focusPauseUI(held) {
+    document.getElementById('app')?.setAttribute('data-focus', held ? 'paused' : 'running');
+    if (this.focusPauseBtn) {
+      this.focusPauseBtn.textContent = held ? '▶' : '❚❚';
+      const key = held ? 'fn.focusResume' : 'fn.focusPause';
+      this.focusPauseBtn.dataset.i18nAria = key;
+      this.focusPauseBtn.dataset.i18nTitle = key;
+      this.focusPauseBtn.setAttribute('aria-label', t(key));
+      this.focusPauseBtn.title = t(key);
+    }
+  }
+
   _tickFocus() {
     if (!this.focus) return;
-    const left = Math.max(0, this.focus.until - Date.now());
+    const now = this.focus.pausedAt || Date.now();
+    const left = Math.max(0, this.focus.until - now);
     if (left <= 0) {
       this.set('focus', false, 'done');
       return;
@@ -343,22 +406,36 @@ export default class Modes {
     const mm = String(Math.floor(left / 60000)).padStart(2, '0');
     const ss = String(Math.floor((left % 60000) / 1000)).padStart(2, '0');
     this._setState('focus', `${mm}:${ss}`);
-    this._note(t('fn.focusRunning', { time: `${mm}:${ss}`, drifts: this.focus.drifts }));
+    if (this.focusTimeEl) this.focusTimeEl.textContent = `${mm}:${ss}`;
+    if (this.focusDriftEl) {
+      this.focusDriftEl.textContent = this.focus.drifts
+        ? t('fn.focusDrifts', { drifts: this.focus.drifts })
+        : '';
+    }
+    if (this.focusBlock) this.focusBlock.hidden = false;
+    // The block above the dial carries the clock, so the note under it is only
+    // for the drift message — and only for as long as it is news.
+    if (this.focus.noteUntil && Date.now() > this.focus.noteUntil) {
+      this.focus.noteUntil = 0;
+      this._note('');
+    }
   }
 
   _driftStart() {
-    if (!this.focus) return;
+    // A pause is a deliberate break, so looking away during one is not a drift.
+    if (!this.focus || this.focus.pausedAt) return;
     this.focus.away = Date.now();
   }
 
   _driftEnd() {
-    if (!this.focus || !this.focus.away) return;
+    if (!this.focus || !this.focus.away || this.focus.pausedAt) return;
     // Under two seconds is a notification or a rotation, not a distraction.
     const gone = Date.now() - this.focus.away;
     this.focus.away = 0;
     if (gone < 2000) return;
     this.focus.drifts += 1;
     const line = t('fn.focusDrift', { drifts: this.focus.drifts, seconds: Math.round(gone / 1000) });
+    this.focus.noteUntil = Date.now() + 8000;
     this._note(line);
     this.voice?.speak(line, (state.get('config') || {}).conversation_language);
   }

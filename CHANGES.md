@@ -2,6 +2,54 @@
 
 ---
 
+# V2.5 — the annotated reference layout
+
+The home screen is now stacked in the order of the annotated reference, top
+to bottom, with the navigation menu staying on the left and nothing but the
+chat bar at the bottom.
+
+| # | Block | What changed |
+|---|-------|--------------|
+| 1 | Avatar / hologram | A framed panel at the top of the column showing the holographic bust on its own WebGL surface, so the head and the dial are both on screen at once. |
+| 2 | Timer / focus | A compact pause / time / stop block directly under the avatar, shown **only while a FOCUS session is running**. |
+| 3 | Rings | Unchanged dial, re-budgeted to `clamp(150px, 25dvh, 240px)` to make room above it. |
+| 4 | Status / model | The slim connection chips, unchanged. |
+| 5 | Mode buttons | RINGS / FACE, unchanged. |
+| 6 | Function buttons | EYES / WATCH / HOLO / FOCUS / REFLEX, the existing vertical compact list. |
+| 7 | Chat bar | The bottom dock, unchanged. |
+
+## The focus timer
+
+* Pause shifts the deadline by however long the pause lasted, so a session
+  still runs for the full time it was asked for, and the paused minutes are
+  excluded from the summary.
+* Looking away during a pause is a deliberate break, so it no longer counts
+  as a drift.
+* The drift count moved into the block's caption. The note under the dial is
+  now only used for the drift message and the closing summary, and both clear
+  themselves after eight seconds instead of sitting over the visualiser.
+* New strings in all six languages: `fn.focusPause`, `fn.focusResume`,
+  `fn.focusStop`, `fn.focusDrifts` (replacing the now-unused
+  `fn.focusRunning`).
+
+## Two fixes found while testing this layout
+
+* **Immersive mode had stopped expanding.** The stage carries an explicit
+  height, which beat `inset: 0` on the fixed element, so a tap switched the
+  screen to immersive and left the dial card-sized in the middle of it. The
+  immersive rule now resets `height` and `max-height` as well as `width`.
+* **The avatar card could vanish on load.** A WebGL context can be refused
+  transiently while another is being created; that was treated as permanent
+  and the card was hidden for the session. It now retries once on the next
+  frame and only gives the space back if the second attempt fails too, with a
+  console warning rather than silence.
+
+The avatar card hides itself when the main stage is already in FACE mode —
+rendering the same head twice would cost a second draw for nothing — and in
+landscape, where height is the scarce axis.
+
+---
+
 # V2.4 — a second brain: OpenAI alongside Ollama
 
 Ollama stays the default: local, free, offline, private. OpenAI is now

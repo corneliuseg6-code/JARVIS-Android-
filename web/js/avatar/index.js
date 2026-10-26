@@ -26,15 +26,24 @@ const MODES = ['rings', 'face'];
 const LEGACY_MODES = ['cube', '3d', 'box'];
 
 export default class Avatar {
-  constructor(canvas2d, canvasGl) {
+  constructor(canvas2d, canvasGl, canvasCard) {
     this.canvas2d = canvas2d;
     this.canvasGl = canvasGl;
+    // The small hologram card above the dial. It is a second WebGL surface
+    // rather than a second view of the first, because a canvas cannot be
+    // presented in two places — and the reference shows the face and the
+    // rings on screen at the same time, not one instead of the other.
+    this.canvasCard = canvasCard || null;
     this.ctx = canvas2d.getContext('2d', { alpha: true, desynchronized: true });
 
     this.rings = new RingsAvatar();
     this.face3d = canvasGl ? new Face3D() : null;
+    this.cardFace = canvasCard ? new Face3D() : null;
     this.faceFallback = new FaceAvatar();
     this.renderers = { rings: this.rings, face: this.faceFallback };
+    this._cardReady = false;
+    this._cardWanted = true;
+    this._cardRetried = false;
 
     this.mode = 'rings';
     this.activity = 'idle';
@@ -113,6 +122,44 @@ export default class Avatar {
     const gl = this.mode === 'face' && this._glReady;
     if (this.canvasGl) this.canvasGl.hidden = !gl;
     this.canvas2d.hidden = gl;
+    // With FACE on the main stage the card would be the same head twice, so
+    // it stands down and gives its space back.
+    this._applyCard();
+  }
+
+  /** Bring the card's own GL context up the first time it is actually shown. */
+  _applyCard() {
+    const card = document.getElementById('avatar-card');
+    const wanted = this._cardWanted && this.mode !== 'face';
+    if (card) card.hidden = !wanted;
+    if (!wanted || !this.cardFace || this.cardFace.failed) return;
+    if (!this.cardFace.ready) {
+      this._cardReady = this.cardFace.init(this.canvasCard, {
+        quality: this.motion < 1 ? 'low' : 'high',
+      });
+      if (!this._cardReady && card) {
+        // Nothing to show. A context can also be refused transiently while
+        // another one is being created, so try once more on the next frame
+        // before giving the space back.
+        card.hidden = true;
+        if (!this._cardRetried) {
+          this._cardRetried = true;
+          this.cardFace.failed = false;
+          requestAnimationFrame(() => { this._applyCard(); this.resize(); });
+        } else {
+          console.warn('[avatar] card WebGL unavailable — showing rings only');
+        }
+      }
+    } else {
+      this._cardReady = true;
+    }
+  }
+
+  /** Let the interface turn the card off entirely (e.g. reduced motion). */
+  setCardVisible(on) {
+    this._cardWanted = !!on;
+    this._applyCard();
+    this.resize();
   }
 
   setActivity(activity) {
@@ -174,6 +221,21 @@ export default class Avatar {
         this.canvasGl.height = gh;
       }
     }
+    if (this.canvasCard) {
+      const card = this.canvasCard.parentElement || this.canvasCard;
+      const box = card.getBoundingClientRect();
+      this.cardW = Math.max(60, Math.floor(box.width));
+      this.cardH = Math.max(60, Math.floor(box.height));
+      // The card is small, so it gets a tighter ratio again: at this size
+      // nobody can tell, and it is drawn alongside the dial every frame.
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      const cw = Math.round(this.cardW * dpr);
+      const ch = Math.round(this.cardH * dpr);
+      if (this.canvasCard.width !== cw || this.canvasCard.height !== ch) {
+        this.canvasCard.width = cw;
+        this.canvasCard.height = ch;
+      }
+    }
     if (!this.running) this._drawOnce();
   }
 
@@ -209,8 +271,9 @@ export default class Avatar {
       this.ctx.setTransform(1, 0, 0, 1, 0, 0);
       this.ctx.clearRect(0, 0, this.canvas2d.width, this.canvas2d.height);
     }
-    const gl = this.face3d?.gl;
-    if (gl) {
+    for (const renderer of [this.face3d, this.cardFace]) {
+      const gl = renderer?.gl;
+      if (!gl) continue;
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
@@ -255,6 +318,8 @@ export default class Avatar {
     if (next === this._quality) return;
     this._quality = next;
     renderer.setQuality(next);
+    // The card draws every frame too, so it sheds load with the main stage.
+    this.cardFace?.setQuality?.(next);
     console.info('[avatar] %d fps — visualiser quality now %d', Math.round(fps), next);
   }
 
@@ -280,6 +345,10 @@ export default class Avatar {
         this.ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
         renderer.draw(this.ctx, env);
       }
+      // The hologram card, alongside whatever the main stage is showing.
+      if (this._cardReady && this.cardFace?.ready && this.cardW) {
+        this.cardFace.render(this.canvasCard, { ...env, w: this.cardW, h: this.cardH });
+      }
     } catch (err) {
       console.error('[avatar] render failed', err);
       // A failing WebGL renderer drops back to the 2D head rather than
@@ -302,5 +371,6 @@ export default class Avatar {
     window.removeEventListener('orientationchange', this._onResize);
     if (this._ro) this._ro.disconnect();
     this.face3d?.dispose?.();
+    this.cardFace?.dispose?.();
   }
 }

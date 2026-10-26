@@ -289,6 +289,7 @@ async function boot() {
   app.avatar = guard('avatar', () => new Avatar(
     document.getElementById('avatar-canvas'),
     document.getElementById('avatar-gl'),
+    document.getElementById('avatar-card-gl'),
   ));
   app.avatar?.start();
   applyAvatarMode((config && config.avatar_mode) || local.avatarMode || 'rings');
