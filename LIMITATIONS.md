@@ -272,3 +272,24 @@ used, because spending money is the user's decision.
 
 **Not verified on hardware:** Android Chrome's own handling of the status bar
 and gesture bar, and the installed PWA. Chromium desktop was used here.
+
+## Shortcuts, clock and ambient layers — verified
+
+| What | How it was verified |
+|---|---|
+| Shortcut targets | OpenAI → `https://chatgpt.com/`, GitHub → `https://github.com/`, both `target="_blank"` with `rel="noopener noreferrer"` |
+| Custom shortcuts | typed into the real Settings fields, saved, and the top bar repainted with the new name and address |
+| URL validation | `javascript:alert(1)` refused by the backend, slot stayed a `+`, and the interface explained why |
+| Empty slot | shows `+` and opens Settings when tapped |
+| Clock | `HH:MM:SS`, ticks, date beneath, and showed London time while the browser's own zone was Europe/Bucharest |
+| Clock placement | centred on the dial's axis to within a pixel, above it, and the dial's geometry is unchanged |
+| Particles | ~898 at full quality; mean displacement over 1.2s was 0.2px against ~4px travelled per mote, i.e. no net direction |
+| Particle cost | 0.10 ms/frame measured against the same scene with the layer stopped |
+| Edge pulse | `animation-name: edge-run` running in both modes |
+| Chat panel | identical `background-color` in normal and full screen |
+| Cinematic scene | off in normal mode, on in full screen, off again on exit while the particles keep running |
+
+**Not verified on hardware:** real frame rates. This container has only
+SwiftShader, a CPU rasteriser, where the dial alone measures 15fps — so the
+absolute numbers mean nothing and only the *difference* between layers is
+informative. The 0.10 ms figure is that difference.

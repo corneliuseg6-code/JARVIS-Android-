@@ -20,6 +20,23 @@
 <body>
 <noscript class="noscript">JARVIS needs JavaScript enabled.</noscript>
 
+<!-- The full-screen backdrop sits behind the whole app and is drawn only while
+     full screen is on. Outside #app so no panel, sheet or drawer can stack
+     above or below it by accident. -->
+<div class="backdrop" id="backdrop" aria-hidden="true">
+  <canvas id="backdrop-canvas"></canvas>
+</div>
+
+<!-- The travelling edge pulse. An SVG stroke animated in CSS rather than a
+     canvas: it is one composited element, so it costs the main thread nothing
+     per frame — which is what makes it affordable on a phone alongside the
+     dial and the particle field. -->
+<svg class="edge" id="edge" aria-hidden="true" focusable="false"
+     preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <rect class="edge-base" pathLength="1000"/>
+  <rect class="edge-pulse" pathLength="1000"/>
+</svg>
+
 <div id="app" class="app" data-view="home" data-power="active">
 
   <!-- ===================== top bar ===================== -->
@@ -51,6 +68,12 @@
             data-i18n-aria="settings.title" data-i18n-title="settings.title">⚙</button>
   </header>
 
+  <!-- Shortcuts: the top bar's second line. The first line is already full at
+       412px, and squeezing four more controls into it would mean shrinking
+       the brand or the activity pill — a redesign, which is not what was
+       asked for. Filled by ui/shortcuts.js. -->
+  <nav class="shortcuts" id="shortcuts" data-i18n-aria="sc.group"></nav>
+
   <!-- Shown for a few seconds after a tap while full screen. -->
   <button class="fs-exit" id="btn-fullscreen-exit" type="button" hidden
           data-i18n-aria="fs.exit" data-i18n-title="fs.exit">
@@ -70,6 +93,15 @@
          Filled by ui/status.js: SERVER, OLLAMA (the active brain), VOICE,
          TOOLS, VISION, one under the other. -->
     <div class="rail rail-left" id="status-chips" role="status" aria-live="polite"></div>
+
+    <!-- ============ clock, in the band above the dial ============
+         Column 2, top-aligned, so it shares the dial's axis and sits in the
+         space the band already had. It costs the rings nothing: they keep
+         their size and their position. -->
+    <div class="hud-clock" id="hud-clock" aria-hidden="true">
+      <span class="hud-time" id="hud-time">--:--:--</span>
+      <span class="hud-date" id="hud-date"></span>
+    </div>
 
     <!-- ============ 1. avatar / hologram, upper right ============
          Its own WebGL surface, so the face can be on screen at the same time

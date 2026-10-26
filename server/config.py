@@ -23,6 +23,13 @@ DEFAULTS: dict[str, Any] = {
     "reduced_motion": False,
     "magnifier_enabled": True,
     "hud_label": "J.A.R.V.I.S.",     # the text in the middle of the rings
+    # Two user-defined top-bar shortcuts. OpenAI and GitHub are fixed in the
+    # frontend; these are the other two. An empty url means "not set up yet",
+    # which the interface shows as a "+" rather than a dead button.
+    "shortcut1_name": "",
+    "shortcut1_url": "",
+    "shortcut2_name": "",
+    "shortcut2_url": "",
     # --- assistant behaviour ---------------------------------------------
     "wake_word": "Jarvis",           # REFLEX acts only on a phrase containing it
     "focus_minutes": 30,             # length of a FOCUS session
@@ -122,6 +129,15 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     cfg["hud_label"] = label[:16] or DEFAULTS["hud_label"]
     wake = str(cfg.get("wake_word") or "").strip()
     cfg["wake_word"] = wake[:24] or DEFAULTS["wake_word"]
+
+    # Shortcuts: only ever hand the browser an http(s) address. Anything else
+    # — javascript:, data:, a typo — is dropped rather than rendered as a
+    # link, and the slot falls back to its "+" state.
+    for n in (1, 2):
+        name = str(cfg.get(f"shortcut{n}_name") or "").strip()
+        cfg[f"shortcut{n}_name"] = name[:18]
+        url = str(cfg.get(f"shortcut{n}_url") or "").strip()
+        cfg[f"shortcut{n}_url"] = url[:400] if url.startswith(("http://", "https://")) else ""
     try:
         minutes = int(cfg.get("focus_minutes") or DEFAULTS["focus_minutes"])
     except (TypeError, ValueError):

@@ -321,6 +321,8 @@ export default class Avatar {
     renderer.setQuality(next);
     // The card draws every frame too, so it sheds load with the main stage.
     this.cardFace?.setQuality?.(next);
+    // So does anything else that paints behind the interface.
+    this.onQuality?.(next);
     console.info('[avatar] %d fps — visualiser quality now %d', Math.round(fps), next);
   }
 

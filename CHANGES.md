@@ -2,6 +2,68 @@
 
 ---
 
+# V3.0 — shortcuts, a clock, and ambient light
+
+This branch also carries V2.8 (AI Connections), which was built on `main`
+while the console layout sat on its own branch. The two were merged here so
+there is one branch with everything rather than two that each lack half.
+
+## Four shortcuts on the top bar
+
+OpenAI (chatgpt.com) and GitHub are fixed; the other two are yours, named and
+pointed from **Settings → Top-bar shortcuts**. They are real `<a
+target="_blank" rel="noopener noreferrer">` links, so Android Chrome treats
+them as an ordinary navigation and a long press offers its usual menu. An
+unconfigured slot shows a `+` and opens Settings — never a dead button.
+
+Addresses are validated on the backend: anything that is not `http://` or
+`https://` is dropped, the slot stays a `+`, and the interface says so. A
+`javascript:` URL in the field is refused rather than rendered as a link.
+
+They sit on the header's **second line**. The first line is already full at
+412px — menu, brand, activity, full screen, settings — and squeezing four more
+controls in would have meant shrinking the brand or the activity pill, which
+is a redesign and not what was asked for.
+
+## A clock above the rings
+
+24-hour `HH:MM:SS` with the date beneath, fixed to **Europe/London** rather
+than the phone's own zone, so it stays right wherever the phone is and follows
+British summer time by itself. It ticks on a timer re-aligned to each whole
+second instead of every 1000ms from an arbitrary start, so the seconds change
+when the second changes.
+
+It sits in grid column 2 at the top of the console band — the dial's own axis,
+in space the band already had. The rings keep their size and their position to
+the pixel, and nothing below moves.
+
+## Ambient light, in every mode
+
+- **Suspended particles.** ~900 motes on a Galaxy S25 Ultra, each wandering on
+  its own slowly turning heading. They do not fall and they do not stream:
+  measured over 1.2s the field's mean displacement is a fraction of a pixel in
+  both axes while each mote travels ~4px. One batched `Path2D` and three fills
+  per frame rather than a thousand draw calls — **measured cost 0.10 ms/frame**.
+  They shed with the dial's existing frame-time watchdog, so a slow phone
+  drops to ~270 motes on its own.
+- **A travelling edge pulse.** A thin neon arc running the outer edge, as an
+  SVG stroke with `pathLength="1000"` and a CSS `stroke-dashoffset` animation:
+  one composited element, no JavaScript per frame, and one dash pattern that
+  works at every screen size without measuring anything.
+
+The conversation panel is untouched — same background in every mode.
+
+## The cinematic scene, full screen only
+
+A nebula wash and a hooded figure, drawn onto the same canvas and only while
+full screen is on. It is drawn, not photographed: the brief asked for a face
+that is not clearly visible and a silhouette has none at all, nothing has to
+be licensed or cached, and it can be tinted to JARVIS's own cyan rather than
+graded towards it. A scrim over the whole thing keeps the rings, the rails and
+the text readable.
+
+---
+
 # V2.8 — AI Connections, and a full-screen button
 
 ## A new AI CONNECTIONS section in the menu

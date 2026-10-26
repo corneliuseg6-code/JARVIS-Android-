@@ -28,6 +28,9 @@ import Armory from './ui/armory.js';
 import Eyes from './ui/eyes.js';
 import Connections from './ui/connections.js';
 import Fullscreen from './ui/fullscreen.js';
+import Shortcuts from './ui/shortcuts.js';
+import Clock from './ui/clock.js';
+import Backdrop from './ui/backdrop.js';
 import Modes from './ui/modes.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
@@ -35,7 +38,8 @@ import { toast } from './ui/toast.js';
 const app = {
   avatar: null, mic: null, voice: null, power: null, magnifier: null,
   status: null, chat: null, armory: null, eyes: null, modes: null, settings: null,
-  connections: null, fullscreen: null,
+  connections: null, fullscreen: null, shortcuts: null, clock: null,
+  backdrop: null,
 };
 
 const root = document.getElementById('app');
@@ -219,6 +223,8 @@ function applyLanguage(code, { persist = false } = {}) {
   app.armory?.render();
   app.connections?.render();
   app.fullscreen?.render();
+  app.shortcuts?.render();
+  app.clock?.setLanguage(code);
   app.modes?.render();
   app.settings?.render();
   app.voice?.resetWarnings();
@@ -270,6 +276,8 @@ function applyAvatarMode(mode, { persist = false } = {}) {
 function applyMotion(reduced) {
   root?.setAttribute('data-motion', reduced ? 'reduced' : 'full');
   app.avatar?.setReducedMotion(reduced);
+  app.backdrop?.setReducedMotion(reduced);
+  document.getElementById('edge')?.classList.toggle('is-still', !!reduced);
 }
 
 // ---------------------------------------------------------------- boot
@@ -339,9 +347,26 @@ async function boot() {
       app.mic?.refreshLanguage();
       app.voice?.resetWarnings();
       app.modes?.render();
+      app.shortcuts?.render();
     },
   }));
+  // Ambient layers: the suspended particles and the travelling edge pulse
+  // belong to every mode, so they start here rather than with full screen.
+  app.backdrop = guard('backdrop', () => new Backdrop(
+    document.getElementById('backdrop-canvas'),
+  ));
+  app.backdrop?.start();
+  // One watchdog for the whole screen: when the dial drops a quality level
+  // because frames are slipping, the particle field sheds motes with it.
+  if (app.avatar) app.avatar.onQuality = (level) => app.backdrop?.setQuality(level);
   app.fullscreen = guard('fullscreen', () => new Fullscreen());
+  app.fullscreen?.setBackdrop(app.backdrop);
+  app.shortcuts = guard('shortcuts', () => new Shortcuts({
+    // An unconfigured slot is not a dead button: it opens the place where
+    // you give it a name and an address.
+    onConfigure: () => setView('settings'),
+  }));
+  app.clock = guard('clock', () => new Clock({ language }));
   app.magnifier = guard('magnifier', () => new Magnifier());
   app.magnifier?.setVisible(!config || config.magnifier_enabled !== false);
 

@@ -65,6 +65,9 @@ export default class Fullscreen {
     this.exitBtn = document.getElementById('btn-fullscreen-exit');
     this.hideTimer = 0;
     this.supported = supported();
+    // The backdrop runs in every mode and is owned by the app; full screen
+    // only tells it to add the cinematic scene.
+    this.backdrop = null;
 
     this.enterBtn?.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -155,9 +158,12 @@ export default class Fullscreen {
     }, EXIT_VISIBLE_MS);
   }
 
+  setBackdrop(backdrop) { this.backdrop = backdrop; this.render(); }
+
   render() {
     const on = this.isOn();
     this.root?.setAttribute('data-fullscreen', on ? 'on' : 'off');
+    this.backdrop?.setCinematic(on);
     if (this.enterBtn) {
       // Hidden while full screen — that is requirement 2 — and also when the
       // browser cannot do it at all, so there is no dead control. The PWA

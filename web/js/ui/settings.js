@@ -61,6 +61,7 @@ export default class Settings {
     this.host.append(
       this._interfaceGroup(cfg),
       this._assistantGroup(cfg),
+      this._shortcutsGroup(cfg),
       this._brainGroup(cfg),
       this._voiceGroup(cfg),
       this._modelsGroup(cfg),
@@ -105,6 +106,53 @@ export default class Settings {
       this._save({ reduced_motion: checked })));
     group.appendChild(this._switch(t('settings.magnifier'), cfg.magnifier_enabled !== false, (checked) =>
       this._save({ magnifier_enabled: checked })));
+    return group;
+  }
+
+  /**
+   * The two shortcuts on the top bar that are yours.
+   *
+   * OpenAI and GitHub are fixed; these two take any name and any http(s)
+   * address. A bad address is rejected by the backend and the slot goes back
+   * to its "+" state, so a typo never leaves a link pointing nowhere.
+   */
+  _shortcutsGroup(cfg) {
+    const group = this._group(t('settings.shortcuts'));
+    for (const n of [1, 2]) {
+      const name = document.createElement('input');
+      name.type = 'text';
+      name.maxLength = 18;
+      name.placeholder = t('sc.custom', { n });
+      name.value = cfg[`shortcut${n}_name`] || '';
+      name.addEventListener('change', () =>
+        this._save({ [`shortcut${n}_name`]: name.value.trim() }));
+      group.appendChild(this._field(t('settings.shortcutName', { n }), name));
+
+      const url = document.createElement('input');
+      url.type = 'url';
+      url.inputMode = 'url';
+      url.spellcheck = false;
+      url.placeholder = 'https://…';
+      url.value = cfg[`shortcut${n}_url`] || '';
+      url.addEventListener('change', async () => {
+        const typed = url.value.trim();
+        const next = await this._save({ [`shortcut${n}_url`]: typed });
+        // The backend drops anything that is not http(s); if it did, say so
+        // rather than leaving the box looking accepted.
+        if (typed && next && !next[`shortcut${n}_url`]) {
+          url.value = '';
+          toast(t('settings.shortcutBadUrl'), 'error', 5000);
+        }
+      });
+      const field = this._field(t('settings.shortcutUrl', { n }), url);
+      if (n === 2) {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = t('settings.shortcutHint');
+        field.appendChild(hint);
+      }
+      group.appendChild(field);
+    }
     return group;
   }
 
