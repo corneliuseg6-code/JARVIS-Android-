@@ -65,7 +65,8 @@ def check_frontend():
     required = [
         "index.html", "sw.js", "manifest.webmanifest", "css/jarvis.css", "js/app.js",
         "js/avatar/index.js", "js/avatar/rings.js", "js/avatar/face.js",
-        "js/avatar/face3d.js", "js/avatar/head-mesh.js",
+        "js/avatar/face3d.js", "js/avatar/head-mesh.js", "js/avatar/glb.js",
+        "models/head.glb", "models/head-LICENSE.txt",
         "js/i18n/index.js", "js/ui/mic.js", "js/ui/power.js", "js/ui/magnifier.js",
         "js/ui/armory.js", "js/ui/eyes.js", "js/ui/settings.js", "js/ui/chat.js",
         "js/ui/modes.js",
@@ -90,6 +91,24 @@ def check_frontend():
         (ok if element in html else bad)(label)
     for name in ("eyes", "watch", "holo", "focus", "reflex"):
         (ok if f'id="fn-{name}"' in html else bad)(f"{name.upper()} switch")
+
+    section("FACE bust asset")
+    model = web / "models" / "head.glb"
+    licence = web / "models" / "head-LICENSE.txt"
+    if model.is_file():
+        head = model.read_bytes()[:4]
+        (ok if head == b"glTF" else bad)(f"head.glb is a glb ({len(model.read_bytes()) // 1024} KB)")
+    else:
+        bad("head.glb missing")
+    if licence.is_file():
+        text = licence.read_text(encoding="utf-8", errors="ignore")
+        # CC BY requires the credit to reach the user; both the licence file
+        # and the in-app credit are part of complying with it.
+        (ok if "Attribution" in text else bad)("licence file states the terms")
+        credited = (web / "js" / "i18n" / "en.js").read_text(encoding="utf-8")
+        (ok if "Lee Perry-Smith" in credited else bad)("attribution shown in Settings")
+    else:
+        bad("head-LICENSE.txt missing")
 
     section("Translations")
     reference = None

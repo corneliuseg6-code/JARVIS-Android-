@@ -53,7 +53,7 @@ can take space from the visualiser or push a control off the screen.
 
 | Area | Status |
 |---|---|
-| **Two visualisers** | RINGS (a layered instrument dial: tick crowns, segmented arcs, orbiting satellites, two real 3D gyro rings, reactive core) and FACE (a translucent blue holographic bust — head, hair, neck and shoulders — rendered in WebGL with fresnel rim light, directional shading, scan lines, particles, blinking and a jaw that moves with speech). There is no cube. |
+| **Two visualisers** | RINGS (a layered instrument dial: tick crowns, segmented arcs, orbiting satellites, two real 3D gyro rings, reactive core) and FACE (a real scanned human bust — head, neck and shoulders — rendered in WebGL as a blue hologram: fresnel rim, directional shading, scan sweep, particles, blinking, and a jaw that opens with your voice). The mode names are RINGS and FACE in every language; there is no cube and no third mode. |
 | **Immersive mode** | Tap the visualiser and it fills the screen; every control folds away. Tap again to bring them back. |
 | **EYES** | Camera with front/rear switch, a visible indicator, local vision through Ollama. |
 | **WATCH** | Screen capture through `getDisplayMedia`. **Android browsers have no such API** — the switch says so and stays off rather than pretending. |
@@ -82,8 +82,9 @@ server/      Python backend (standard library only)
 web/         Frontend (plain ES modules, no bundler)
   index.html  css/jarvis.css  sw.js  manifest.webmanifest
   js/avatar/   index.js  rings.js        (Canvas 2D dial)
-               face3d.js head-mesh.js    (WebGL hologram bust)
-               face.js                   (Canvas 2D fallback head)
+               face3d.js glb.js          (WebGL hologram + .glb reader)
+               head-mesh.js face.js      (fallbacks: procedural, then 2D)
+  models/      head.glb  head-LICENSE.txt
   js/i18n/     ro en fr de es it + index.js
   js/ui/       mic power modes magnifier chat armory eyes settings status voice toast
   js/core/     api.js  state.js  bus.js
@@ -141,6 +142,22 @@ it until you pass `--lan`.
 * A tool connection is shown as CONNECTED only after the MCP handshake and
   `tools/list` have both answered.
 * No model and no voice is ever downloaded without you confirming it.
+
+---
+
+## Credits
+
+The FACE bust is **“Infinite”, a 3D head scan by Lee Perry-Smith**, licensed
+**Creative Commons Attribution 3.0 Unported (CC BY 3.0)**, based on a work at
+www.triplegangers.com and obtained from the [three.js](https://github.com/mrdoob/three.js)
+project (MIT), `examples/models/gltf/LeePerrySmith/`.
+
+The licence travels with the model at `web/models/head-LICENSE.txt` and the
+credit is shown in **Settings → Credits**. CC BY requires that attribution, so
+neither may be dropped from a build.
+
+Everything else — the rings, the shaders, the interface and the backend — is
+original to this project.
 
 ---
 

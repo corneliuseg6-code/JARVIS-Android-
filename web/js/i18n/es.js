@@ -192,5 +192,8 @@ export default {
   "settings.focusMinutes": "Sesi\u00f3n de enfoque (minutos)",
   "settings.hudLabel": "Texto en el centro de los anillos",
   "immersive.enter": "Toca el visualizador para pantalla completa",
-  "immersive.exit": "Salir de pantalla completa"
+  "immersive.exit": "Salir de pantalla completa",
+  "settings.credits": "Cr\u00e9ditos",
+  "settings.modelCredit": "\u201cInfinite\u201d, 3D head scan by Lee Perry-Smith \u2014 licensed CC BY 3.0, via the three.js project. Used for the FACE bust.",
+  "settings.viewLicence": "Ver licencia"
 };

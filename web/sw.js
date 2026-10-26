@@ -7,7 +7,7 @@
    cache first, so an already-installed PWA would keep serving the old shell
    until a new cache name makes install() re-fetch it and activate() delete the
    previous one. */
-const CACHE = 'jarvis-v2-2-hologram';
+const CACHE = 'jarvis-v2-3-scan';
 const SHELL = [
   '/',
   '/index.html',
@@ -23,6 +23,11 @@ const SHELL = [
   '/js/avatar/face.js',
   '/js/avatar/face3d.js',
   '/js/avatar/head-mesh.js',
+  '/js/avatar/glb.js',
+  // The bust and the licence it travels under. Both are cached so FACE works
+  // offline, which is the whole point of the service worker.
+  '/models/head.glb',
+  '/models/head-LICENSE.txt',
   '/js/i18n/index.js',
   '/js/i18n/ro.js',
   '/js/i18n/en.js',

@@ -130,9 +130,11 @@ Checked at **412×915** and **360×800** against the running backend:
 
 | Claim | Status |
 |---|---|
-| It is a real 3D surface, shaded and animated in WebGL | **Verified.** The context comes up, the bust renders, the jaw and lids animate in the vertex shader, and the fallback path was exercised by forcing a failure. |
-| It is photoreal | **No, and it does not claim to be.** It is an original stylised model built from a cross-section profile and twenty-two anatomical deformers. There is no scanned or licensed head model in this repository, and none is downloaded. |
-| It is a likeness of anyone | **No.** The anatomy is generic and procedural. |
+| It is a real 3D surface, shaded and animated in WebGL | **Verified.** The context comes up, the scan loads and renders, the jaw and lids animate in the vertex shader, and the fallback path was exercised by forcing a failure. |
+| It is a real scanned human head | **Yes.** 9,279 vertices, 17,684 triangles, with neck and shoulders. |
+| The licence was verified | **Yes** — CC BY 3.0, read from `LeePerrySmith_License.txt` as shipped beside the model in the three.js repository, and copied into this one. The authoritative publisher page (casual-effects.com) was **not** reachable from the build environment, so the verification rests on the licence file the redistributor ships, not on the original site. |
+| **It is a real, identifiable person** | **Yes — read this.** The scan is of Lee Perry-Smith. CC BY 3.0 grants the copyright permission, with attribution, and this is how the model is distributed in three.js, Blender demos and graphics papers. It does **not** settle likeness or personality rights, which are a separate matter from copyright and vary by country. If you are uncomfortable giving your assistant a real person's face, set `avatar_mode` to `rings`, or delete `web/models/head.glb` — FACE then falls back to the original procedural bust automatically, with no code change. |
+| It has hair | **Barely.** The scan is close-cropped, so the head reads as shaved rather than the styled hair in your reference. Nothing was added on top of it, because you asked for no more procedural face work. |
 | It runs well on a phone GPU | **Not measured.** The only renderer available in this session was SwiftShader — Chromium's pure-CPU rasteriser, with no GPU at all — where the bust manages single-digit frames. That number says nothing about an Adreno: it is a software rasteriser running a shader with heavy overdraw. What *is* in the code is a frame-time watchdog that measures real frames and sheds the glow passes, the mesh overlay and the particles if they are not being hit, and a fallback to the Canvas 2D head if WebGL is refused outright. **Check it on your phone**: if FACE feels heavy, RINGS is the cheap mode and switching is one tap. |
 | RINGS performance | **Verified at 60fps** in the same software renderer, so it has a very large margin on real hardware. |
 

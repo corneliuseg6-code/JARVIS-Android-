@@ -2,6 +2,81 @@
 
 ---
 
+# V2.3 — FACE is a real scanned head
+
+The procedural bust is gone from the default path. FACE now renders an actual
+3D human head scan through the hologram shader.
+
+## The model
+
+* **“Infinite”, 3D head scan by Lee Perry-Smith**
+* **Creative Commons Attribution 3.0 Unported (CC BY 3.0)** — permissive,
+  attribution required
+* Based on a work at www.triplegangers.com
+* Obtained from the three.js project (MIT), `examples/models/gltf/LeePerrySmith/`
+* Licence verified from `LeePerrySmith_License.txt`, shipped alongside the
+  model in that repository, and copied into this one at
+  `web/models/head-LICENSE.txt`
+* 9,279 vertices / 17,684 triangles / 395 KB, head **and neck and shoulders**
+
+The attribution appears in **Settings → Credits** with a link to the full
+licence. CC BY requires it, so the self-test now fails the build if either the
+licence file or the in-app credit goes missing.
+
+## Loading it
+
+`glb.js` is a ~150-line GLB reader: container header, JSON and BIN chunks,
+accessors, interleaving, and normals derived from the triangles if a file
+ships without them. No 3D library is vendored — pulling in 600KB of one to
+read three attributes out of a single mesh would cost more than it saves, and
+it would have to be cached and maintained too.
+
+`fitBust()` then measures the scan and rigs it, without touching the geometry:
+
+* the width profile finds the skull's widest slice, then the neck below it,
+  then the **top** of the flat neck run — which is the chin. Looking for "the
+  narrowest slice from the top" instead finds the crown, which is also narrow,
+  and collapses the fit to nothing. That bug made the bust invisible once.
+* the scan is scaled and centred so the crown is y = +1 and the chin y = −1
+* the nose is located as the front-most point near the centre line, and the
+  eye line and jaw hinge are placed relative to it rather than assuming the
+  scan shares the old procedural model's proportions
+* per-vertex jaw and eyelid weights are derived, with the jaw falling back to
+  zero below the chin so the mouth opens without dragging the throat
+
+## Depth prepass
+
+A hologram is additive, which is why it looks translucent — but a scanned head
+has interior geometry, and additively every bit of it shone straight through
+the face: eyeballs as spheres on the cheeks, the inside of the mouth as a slab
+across the chin. The fix is a depth prepass — fill the depth buffer with the
+nearest surface writing no colour, then run the additive colour pass against
+it — so only the surface actually facing you contributes. The context now
+requests a depth buffer for this.
+
+Curves, particles and irises still ignore depth, because they are meant to
+read through the surface.
+
+## Fallbacks
+
+Unchanged in spirit, now three deep: the scan, then the procedural bust if the
+model is missing or unreadable, then the Canvas 2D head if WebGL is refused.
+FACE never ends up blank because an asset failed. The procedural bust renders
+immediately on entry and the scan swaps in when it has downloaded, so there is
+no empty stage while a 395 KB file arrives.
+
+The service worker caches the model and its licence, so FACE works offline.
+
+## Also
+
+* **"CHIP" was never a mode.** It was `avatar.face` translated into Romanian.
+  RINGS and FACE are now untranslated product labels in all six languages.
+* The latitude-grid overlay is gone — a regular grid over a face is what read
+  as "wireframe mask".
+* Scan lines coarsened and dimmed; they were aliasing into banding.
+
+---
+
 # V2.2 — the holographic bust, immersive mode, S25 Ultra
 
 ## FACE is now WebGL, not a wireframe

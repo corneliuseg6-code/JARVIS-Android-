@@ -58,6 +58,7 @@ export default class Settings {
       this._assistantGroup(cfg),
       this._voiceGroup(cfg),
       this._modelsGroup(cfg),
+      this._creditsGroup(),
       this._diagnosticsGroup(),
     );
   }
@@ -289,6 +290,31 @@ export default class Settings {
     prompt.value = cfg.system_prompt || '';
     prompt.addEventListener('change', () => this._save({ system_prompt: prompt.value }));
     group.appendChild(this._field(t('settings.systemPrompt'), prompt));
+    return group;
+  }
+
+  /**
+   * Attribution for the third-party assets JARVIS ships.
+   *
+   * The FACE bust is under CC BY 3.0, which requires the credit to be given
+   * to users — so this group is not decoration and must not be removed from a
+   * build. The full licence travels with the model itself.
+   */
+  _creditsGroup() {
+    const group = this._group(t('settings.credits'));
+    const line = document.createElement('p');
+    line.className = 'panel-sub';
+    line.textContent = t('settings.modelCredit');
+    const link = document.createElement('a');
+    link.className = 'btn btn-sm btn-ghost';
+    link.href = '/models/head-LICENSE.txt';
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = t('settings.viewLicence');
+    link.style.display = 'inline-block';
+    link.style.marginTop = '6px';
+    link.style.textDecoration = 'none';
+    group.append(line, link);
     return group;
   }
 

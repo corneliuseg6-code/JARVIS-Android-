@@ -29,6 +29,21 @@
  * for the particles, one for the wash.
  */
 import { buildBust, buildCurves } from './head-mesh.js';
+import { parseGLB, fitBust } from './glb.js';
+
+/**
+ * The scanned bust JARVIS wears by default.
+ *
+ *   Infinite, 3D Head Scan by Lee Perry-Smith
+ *   Creative Commons Attribution 3.0 Unported (CC BY 3.0)
+ *   Based on a work at www.triplegangers.com
+ *   Obtained from the three.js project (MIT), examples/models/gltf/
+ *
+ * The licence text ships beside the model at /models/head-LICENSE.txt and the
+ * attribution is shown in Settings. CC BY requires credit, so neither may be
+ * dropped from a build.
+ */
+const MODEL_URL = '/models/head.glb';
 
 // ---------------------------------------------------------------- matrices
 
@@ -143,17 +158,18 @@ void main() {
   // the lips and the cheekbones readable from straight on.
   vec3 key = normalize(vec3(-0.52, 0.62, 0.78));
   vec3 fill = normalize(vec3(0.70, -0.35, 0.55));
-  float lam = pow(max(0.0, dot(N, key)), 1.25);
-  float rim2 = pow(max(0.0, dot(N, fill)), 2.0);
-  float shade = lam * 0.92 + rim2 * 0.40;
+  float lam = pow(max(0.0, dot(N, key)), 1.75);
+  float rim2 = pow(max(0.0, dot(N, fill)), 2.2);
+  float shade = lam * 0.88 + rim2 * 0.34;
 
   // Scan lines, drifting slowly down the body. Kept faint and coarse: at a
   // fine pitch they alias into banding that buries the feature curves, which
   // are the part that actually reads as a face.
   float lines = 0.5 + 0.5 * sin(vModel.y * 70.0 - uTime * 1.6);
 
-  // One band sweeping up the bust. Narrow: a wide one washes the face out.
-  float band = exp(-pow((vModel.y - uScanY) * 19.0, 2.0));
+  // One band sweeping up the bust. Narrow: on a solid surface a wide one
+  // reads as a white bar lying across the mouth.
+  float band = exp(-pow((vModel.y - uScanY) * 34.0, 2.0));
 
   // Interference: a slow global flicker, plus a rare horizontal tear.
   float flicker = 0.94 + 0.06 * sin(uTime * 7.3) * sin(uTime * 2.1);
@@ -164,18 +180,18 @@ void main() {
 
   vec3 colour = mix(uDeep, uBright,
     clamp(fres * 1.15 + shade * 0.55 + band * 0.45 + depth * 0.18, 0.0, 1.0));
-  colour += vec3(0.16, 0.52, 0.78) * band * 1.4;
+  colour += vec3(0.10, 0.38, 0.72) * band * 0.9;
   colour += vec3(0.22, 0.55, 0.85) * tear;
 
   float alpha =
-      0.105                       // the body of the hologram, kept dark
-    + fres * 1.30                 // the rim — this is what shows the volume
-    + shade * 0.88                // the modelled light on the face itself
-    + band * 0.30                 // the sweep
-    + lines * 0.028               // the scan lines
-    + tear * 0.30;
+      0.150                       // the body of the hologram
+    + fres * 1.05                 // the rim
+    + shade * 1.05                // the modelled light — carries the anatomy
+    + band * 0.12                 // the sweep
+    + lines * 0.030               // the scan lines
+    + tear * 0.26;
 
-  alpha *= mix(0.42, 1.0, depth);
+  alpha *= mix(0.55, 1.0, depth);
   alpha *= flicker;
   alpha *= 0.86 + uEnergy * 0.48;
 
@@ -189,7 +205,7 @@ void main() {
   // so without this its rim would glow straight through the jaw.
   alpha *= mix(1.0, smoothstep(-0.78, -1.22, vModel.y), uTopFade);
 
-  gl_FragColor = vec4(colour * (1.05 + fres * 1.7 + shade * 0.7 + band * 1.3), alpha);
+  gl_FragColor = vec4(colour * (1.20 + fres * 1.5 + shade * 0.95 + band * 1.2), alpha);
 }`;
 
 const POINT_VS = `
@@ -386,7 +402,11 @@ export default class Face3D {
   init(canvas, { quality = 'high' } = {}) {
     if (this.gl || this.failed) return !this.failed;
     const opts = {
-      alpha: true, antialias: true, depth: false, stencil: false,
+      // A depth buffer is needed even though the hologram is additive: see
+      // the prepass in _bust(). Without it, every interior surface of a
+      // scanned head — eyeballs, the inside of the mouth, the far side of the
+      // skull — adds its light straight through the face.
+      alpha: true, antialias: true, depth: true, stencil: false,
       premultipliedAlpha: false, powerPreference: 'low-power',
       preserveDrawingBuffer: false, failIfMajorPerformanceCaveat: false,
     };
@@ -404,6 +424,9 @@ export default class Face3D {
     }
     this.gl = gl;
     this.ready = true;
+    // The procedural bust renders immediately so the stage is never blank,
+    // and the scan replaces it as soon as it has downloaded and been rigged.
+    this._loadModel();
     canvas.addEventListener('webglcontextlost', (event) => {
       event.preventDefault();
       this.ready = false;
@@ -433,6 +456,7 @@ export default class Face3D {
       return b;
     };
 
+    this._buffer = buffer;
     this.parts = [];
     for (const mesh of [bust.torso, bust.head]) {
       this.parts.push({
@@ -440,11 +464,13 @@ export default class Face3D {
         nor: buffer(mesh.normal),
         wgt: buffer(mesh.weight),
         idx: buffer(mesh.index, gl.ELEMENT_ARRAY_BUFFER),
-        lin: buffer(mesh.line, gl.ELEMENT_ARRAY_BUFFER),
         count: mesh.index.length,
-        lineCount: mesh.line.length,
+        type: gl.UNSIGNED_SHORT,
+        topFade: 1,
       });
     }
+    this.parts[1].topFade = 0;
+    this.usingModel = false;
 
     const curves = buildCurves();
     this.curves = {
@@ -486,7 +512,7 @@ export default class Face3D {
 
     this.washBuffer = buffer(new Float32Array([-1, -1, 3, -1, -1, 3]));
 
-    gl.disable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
     gl.depthMask(false);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);   // additive: the hologram adds light
@@ -561,10 +587,22 @@ export default class Face3D {
     this._viewport = [canvas.width, canvas.height];
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.clearDepth(1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+    this._blink = blink;
+
+    // The wash sits behind everything and ignores depth entirely.
+    gl.disable(gl.DEPTH_TEST);
     this._wash(gl, energy, aspect);
+
+    // Nearest surface into the depth buffer, then the additive colour pass
+    // on top of it, so nothing inside the head shines through the face.
+    this._depthPrepass(gl);
     this._bust(gl, energy, blink);
+
+    // Curves, particles and irises are meant to read through the surface.
+    gl.disable(gl.DEPTH_TEST);
     this._featureCurves(gl, energy, blink);
     this._points(gl, energy, blink, canvas.height);
   }
@@ -594,12 +632,13 @@ export default class Face3D {
     gl.uniform1f(p.u.uScanY, this.scan);
     gl.uniform1f(p.u.uTear, this.tear);
     gl.uniform1f(p.u.uEnergy, energy);
-    gl.uniform3f(p.u.uDeep, 0.030, 0.230, 0.640);
-    gl.uniform3f(p.u.uBright, 0.360, 0.820, 1.000);
+    gl.uniform3f(p.u.uDeep, 0.015, 0.150, 0.640);
+    gl.uniform3f(p.u.uBright, 0.360, 0.740, 1.000);
 
-    this.parts.forEach((part, i) => {
-      // parts[0] is the torso, whose top ring hides inside the head.
-      gl.uniform1f(p.u.uTopFade, i === 0 ? 1 : 0);
+    this.parts.forEach((part) => {
+      // The procedural torso's top ring hides inside the head and has to be
+      // faded; a scanned bust is one continuous surface and needs no such fix.
+      gl.uniform1f(p.u.uTopFade, part.topFade);
       gl.bindBuffer(gl.ARRAY_BUFFER, part.pos);
       gl.enableVertexAttribArray(p.a.aPos);
       gl.vertexAttribPointer(p.a.aPos, 3, gl.FLOAT, false, 0, 0);
@@ -612,19 +651,121 @@ export default class Face3D {
 
       gl.uniform1f(p.u.uLineMode, 0);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, part.idx);
-      gl.drawElements(gl.TRIANGLES, part.count, gl.UNSIGNED_SHORT, 0);
+      gl.drawElements(gl.TRIANGLES, part.count, part.type, 0);
 
-      // The mesh accent: a few latitude rings, so it still reads as a
-      // projection rather than as a solid object.
       // No latitude-grid overlay. A regular grid laid over a face is exactly
-      // what reads as "wireframe mask" — the surface shading and the
-      // anatomical curves carry the form instead.
+      // what reads as "wireframe mask" — the surface shading carries the form.
     });
+  }
+
+  /**
+   * Fill the depth buffer with the nearest surface, writing no colour.
+   *
+   * A hologram is additive, so without this every surface behind the face
+   * adds its own light straight through it. On a scanned head that means the
+   * eyeballs, the inside of the mouth and the far side of the skull all show
+   * up as solid blobs across the cheeks. With a prepass, only the surface
+   * actually facing you survives the depth test in the colour pass.
+   */
+  _depthPrepass(gl) {
+    const p = this.bustProgram;
+    gl.useProgram(p.handle);
+    gl.uniformMatrix4fv(p.u.uProj, false, this._proj);
+    gl.uniformMatrix4fv(p.u.uMV, false, this._mv);
+    gl.uniformMatrix3fv(p.u.uNor, false, this._nor);
+    gl.uniform2f(p.u.uHinge, this.hinge.y, this.hinge.z);
+    gl.uniform1f(p.u.uJaw, this.jaw);
+    gl.uniform1f(p.u.uBlink, this._blink || 0);
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.colorMask(false, false, false, false);
+    gl.depthMask(true);
+    for (const part of this.parts) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, part.pos);
+      gl.enableVertexAttribArray(p.a.aPos);
+      gl.vertexAttribPointer(p.a.aPos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, part.nor);
+      gl.enableVertexAttribArray(p.a.aNor);
+      gl.vertexAttribPointer(p.a.aNor, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, part.wgt);
+      gl.enableVertexAttribArray(p.a.aWeight);
+      gl.vertexAttribPointer(p.a.aWeight, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, part.idx);
+      gl.drawElements(gl.TRIANGLES, part.count, part.type, 0);
+    }
+    gl.colorMask(true, true, true, true);
+    gl.depthMask(false);
+  }
+
+  /**
+   * Fetch the scanned bust, rig it and swap it in for the procedural one.
+   *
+   * Everything about this is best-effort: if the file is missing, truncated,
+   * not a glb, or the device refuses the buffers, the procedural bust simply
+   * stays on screen. FACE must never end up blank because an asset failed.
+   */
+  async _loadModel() {
+    if (this.usingModel || this._loading) return;
+    this._loading = true;
+    try {
+      const response = await fetch(MODEL_URL, { cache: 'force-cache' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const raw = parseGLB(await response.arrayBuffer());
+      if (!raw) throw new Error('not a usable glb');
+
+      const gl = this.gl;
+      if (!gl || !this.ready) return;
+      const fitted = fitBust(raw);
+
+      // Indices beyond 65535 need an extension that not every phone has.
+      let index = fitted.index;
+      let type = gl.UNSIGNED_SHORT;
+      if (!(index instanceof Uint16Array)) {
+        if (fitted.position.length / 3 > 65536 && !gl.getExtension('OES_element_index_uint')) {
+          throw new Error('mesh needs 32-bit indices, unsupported here');
+        }
+        if (fitted.position.length / 3 <= 65536) index = Uint16Array.from(index);
+        else type = gl.UNSIGNED_INT;
+      }
+
+      const buffer = this._buffer;
+      const part = {
+        pos: buffer(fitted.position),
+        nor: buffer(fitted.normal),
+        wgt: buffer(fitted.weight),
+        idx: buffer(index, gl.ELEMENT_ARRAY_BUFFER),
+        count: index.length,
+        type,
+        topFade: 0,
+      };
+
+      const eyes = new Float32Array(6);
+      const eyeSeed = new Float32Array(4);
+      fitted.eyes.forEach((e, i) => {
+        eyes[i * 3] = e.x;
+        eyes[i * 3 + 1] = e.y;
+        eyes[i * 3 + 2] = e.z + 0.015;
+        eyeSeed[i * 2] = 0;
+        eyeSeed[i * 2 + 1] = 0.12;
+      });
+      this.eyeBuffer = buffer(eyes);
+      this.eyeSeedBuffer = buffer(eyeSeed);
+
+      this.parts = [part];
+      this.curves = null;          // the scan carries its own anatomy
+      this.usingModel = true;
+      console.info('[face3d] scanned bust in use — %d triangles', index.length / 3);
+    } catch (err) {
+      console.warn('[face3d] model unavailable, keeping the procedural bust:', err.message);
+    } finally {
+      this._loading = false;
+    }
   }
 
   _featureCurves(gl, energy, blink) {
     const p = this.curveProgram;
     const c = this.curves;
+    if (!c) return;
     gl.useProgram(p.handle);
     gl.uniformMatrix4fv(p.u.uProj, false, this._proj);
     gl.uniformMatrix4fv(p.u.uMV, false, this._mv);
