@@ -585,9 +585,9 @@ export default class Face3D {
     // and wide enough that the head never touches the sides. Whichever of the
     // two needs more room wins, so the head cannot crop on any stage shape.
     const FOV = 0.72;
-    const FIT_H = 3.20;                 // crown to the top of the chest
-    const FIT_W = 2.20;                 // comfortably wider than the head
-    const CENTRE_Y = -0.30;             // the middle of that box
+    const FIT_H = 3.55;                 // crown to the top of the chest
+    const FIT_W = 2.35;                 // comfortably wider than the head
+    const CENTRE_Y = -0.38;             // the middle of that box
     // The face is not at the model origin — the nose is about a unit nearer
     // the camera, and perspective magnifies it by roughly half again. Fitting
     // at the origin plane therefore overshoots and crops the head, so the fit

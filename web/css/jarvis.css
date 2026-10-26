@@ -85,22 +85,22 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 
 /* ===================== workspace =====================
-   An open field on the left and a narrow HUD column on the right, the way the
-   reference lays it out: a small visualiser at the top right with every
-   control stacked directly beneath it. The field is deliberately empty — it
-   is what the hologram appears to float in. */
+   One centred column: the visualiser sits in the middle of whatever space is
+   going, with every control stacked compactly beneath it. On a phone there is
+   nothing to put beside it, so nothing is set aside for one. */
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(186px, 58%, 250px);
-  align-items: start;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  align-items: center;
   min-height: 0;
   overflow: hidden;
 }
 
 .hud-col {
-  grid-column: 2;
-  align-self: start;
+  width: 100%;
+  max-width: clamp(240px, 86%, 340px);
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -202,10 +202,14 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 /* ===================== stage ===================== */
 .stage {
   position: relative;
-  /* Square, and sized by the column rather than by whatever space is left
-     over: the visualiser is a fixed instrument, not a filler. */
-  width: 100%;
+  /* Square, and driven by height rather than width, so the controls under it
+     always have room: the visualiser is a fixed instrument, not a filler.
+     max-width keeps it inside a narrow screen, shrinking it squarely. */
   aspect-ratio: 1 / 1;
+  height: clamp(180px, 38dvh, 320px);
+  width: auto;
+  max-width: 100%;
+  margin-inline: auto;
   flex: none;
   border-radius: var(--radius);
   background: radial-gradient(62% 58% at 50% 46%, rgba(16, 70, 86, .28), transparent 72%);
@@ -776,7 +780,7 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 /* Short phones: tighten the column so the whole stack still clears the dock. */
 @media (max-height: 700px) {
   .app { gap: 4px; font-size: calc(14px * var(--zoom)); }
-  .workspace { grid-template-columns: minmax(0, 1fr) clamp(170px, 52%, 220px); }
+  .stage { height: clamp(150px, 32dvh, 250px); }
   .fn { min-height: 25px; }
   .ctl { min-height: 29px; }
   .app[data-dock="expanded"] .dock { max-height: 50dvh; }
@@ -784,21 +788,21 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 /* Narrow phones: the five function labels still have to fit. */
 @media (max-width: 370px) {
-  .workspace { grid-template-columns: minmax(0, 1fr) clamp(165px, 64%, 210px); }
+  .hud-col { max-width: 94%; }
   .fn-name { letter-spacing: .08em; }
 }
 
-/* Landscape: the column is already on the right, so it only needs to be
-   shorter — the visualiser shrinks to whatever height is going. */
+/* Landscape: height is the scarce axis, so the visualiser gives way first. */
 @media (orientation: landscape) and (max-height: 560px) {
-  .workspace { grid-template-columns: minmax(0, 1fr) clamp(190px, 34%, 260px); }
-  .stage { aspect-ratio: auto; height: clamp(110px, 38dvh, 190px); }
+  .stage { height: clamp(110px, 30dvh, 190px); }
+  .hud-col { max-width: clamp(240px, 54%, 330px); }
   .app[data-dock="expanded"] .dock { max-height: 62dvh; }
 }
 
-/* Tablet / desktop PWA window: centre it, keep the HUD column narrow. */
+/* Tablet / desktop PWA window: centre it, keep the column phone-sized. */
 @media (min-width: 760px) {
   .app { max-width: 980px; margin: 0 auto; padding-inline: 16px; }
-  .workspace { grid-template-columns: minmax(0, 1fr) 260px; }
+  .hud-col { max-width: 380px; }
+  .stage { height: clamp(220px, 40dvh, 380px); }
   .dock { max-width: 680px; margin: 0 auto; width: 100%; }
 }
