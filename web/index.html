@@ -65,11 +65,6 @@
 
     <!-- ============ 4. control rail, down the right ============ -->
     <div class="rail rail-right">
-      <div class="mode-row" id="avatar-switch" role="group" data-i18n-aria="avatar.mode">
-        <button type="button" class="mode-btn is-active" data-mode="rings" data-i18n="avatar.rings">Rings</button>
-        <button type="button" class="mode-btn" data-mode="face" data-i18n="avatar.face">Face</button>
-      </div>
-
       <button class="ctl ctl-mic is-muted" id="btn-mic" type="button" aria-pressed="false">
         <span class="ctl-dot" aria-hidden="true"></span>
         <span class="ctl-label" id="mic-label" data-i18n="mic.mute">Mute</span>
@@ -108,11 +103,11 @@
       </div>
     </div>
 
-    <!-- ============ 2. the rings, centred ============
-         Laid over the whole console and centred in it, so the dial can be
-         wider than the gap between the rails — the rails sit on top of its
-         outer crown, as in the reference. Last in source order so the rails
-         keep the taps that belong to them. -->
+    <!-- ============ 2. the rings, centred between the rails ============
+         In the middle column and centred on it, so its axis is the axis of
+         the gap rather than of the whole band. It is wider than that gap, so
+         its outer crown runs under the translucent rails, as in the
+         reference. Last in source order so the rails keep their own taps. -->
     <main class="stage" id="stage">
       <!-- Two canvases: a canvas can hold only one kind of context, and RINGS
            is Canvas 2D while FACE is WebGL. Only the active one is shown. -->
@@ -133,6 +128,13 @@
         </div>
       </div>
     </main>
+
+    <!-- RINGS / FACE: its own row under the dial, exactly as wide, and clear
+         of both rails so nothing covers its ends. -->
+    <div class="mode-row" id="avatar-switch" role="group" data-i18n-aria="avatar.mode">
+      <button type="button" class="mode-btn is-active" data-mode="rings" data-i18n="avatar.rings">Rings</button>
+      <button type="button" class="mode-btn" data-mode="face" data-i18n="avatar.face">Face</button>
+    </div>
   </section>
 
   <!-- ============ focus timer ============

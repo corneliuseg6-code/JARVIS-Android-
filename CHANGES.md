@@ -2,6 +2,43 @@
 
 ---
 
+# V2.7 — tightening the console
+
+Layout refinements only; nothing else moved.
+
+* **The dial is centred between the rails, not on the band.** It used to be
+  centred on the whole console, and because the control rail is wider than
+  the status rail that put it visibly right of the space it sits in. Its axis
+  is now the axis of the clear span, which moves it left by half the
+  difference between the two rail widths.
+* **RINGS / FACE moved out of the control rail** and into a row of its own
+  directly under the dial, exactly as wide as it and on the same axis. The
+  bottom row belongs to it alone, so neither rail can cover its ends.
+* **The empty band under the rings is gone.** The dial is sized from the
+  hologram and the rail above it, so what is left under it is the toggle and
+  a 5px margin rather than ~50px of background.
+* **The hologram took the space the toggle left**, growing from 92px to
+  119px on a Galaxy S25 Ultra — the right column now has no dead height.
+
+The dial's width is the clear span between the rails plus a 28px bleed each
+side, capped by the height of the hologram and rail together. The bleed is
+what keeps the rings reading as continuous behind the translucent rails
+without the rails landing on their labels; the cap is what leaves no gap.
+
+## One subtlety worth recording
+
+The console's sizes are derived with `calc()` from `--rail-row` and
+`--avatar-h`. Those derived properties are declared on `.app`, not on
+`:root`, because a custom property is resolved on the element that declares
+it: deriving them at the root would freeze them against the root's inputs and
+the keyboard and short-screen overrides would silently do nothing. That is
+exactly what happened on the first attempt — the conversation stayed at 103px
+with the keyboard up until the declarations moved down one level. It now gets
+281px on an S25 Ultra and 166px on a 360×800 phone, better than before this
+change rather than worse.
+
+---
+
 # V2.6 — console and conversation
 
 The home screen is now two things: an instrument band at the top and the
