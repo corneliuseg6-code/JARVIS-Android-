@@ -24,8 +24,8 @@ export default {
   "status.lastCheck": "Dernière vérification",
 
   "avatar.mode": "Avatar",
-  "avatar.rings": "Anneaux",
-  "avatar.face": "Visage",
+  "avatar.rings": "Rings",
+  "avatar.face": "Face",
 
   "activity.idle": "En veille active",
   "activity.listening": "J'écoute",

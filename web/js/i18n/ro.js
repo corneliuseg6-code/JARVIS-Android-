@@ -24,8 +24,8 @@ export default {
   "status.lastCheck": "Ultima verificare",
 
   "avatar.mode": "Avatar",
-  "avatar.rings": "Inele",
-  "avatar.face": "Chip",
+  "avatar.rings": "Rings",
+  "avatar.face": "Face",
 
   "activity.idle": "În așteptare",
   "activity.listening": "Ascult",

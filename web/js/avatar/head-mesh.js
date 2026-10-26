@@ -32,33 +32,37 @@ const TAU = Math.PI * 2;
  * way down the face, and the skull is deeper than it is wide.
  */
 const HEAD_PROFILE = [
-  [ 1.06,  0.100, 0.130, -0.030, 0.90],
-  [ 1.00,  0.300, 0.360, -0.045, 0.86],
-  [ 0.92,  0.460, 0.550, -0.060, 0.84],
-  [ 0.80,  0.600, 0.720, -0.072, 0.82],
-  [ 0.62,  0.680, 0.820, -0.078, 0.80],
-  [ 0.40,  0.726, 0.870, -0.072, 0.79],
-  [ 0.18,  0.752, 0.896, -0.056, 0.78],
-  [ 0.00,  0.760, 0.900, -0.034, 0.78],
-  [-0.20,  0.746, 0.880, -0.014, 0.78],
-  [-0.40,  0.690, 0.812,  0.002, 0.79],
-  [-0.58,  0.600, 0.726,  0.012, 0.80],   // gonion — the corner of the jaw
-  [-0.76,  0.452, 0.596,  0.016, 0.82],
-  [-0.90,  0.268, 0.400,  0.014, 0.86],
-  [-1.02,  0.090, 0.185,  0.010, 0.90],
+  //  A male skull: the crown is flatter, the brow shelf wider, and the jaw
+  //  keeps its width most of the way to the chin instead of tapering to a
+  //  point. Those three things are most of what reads as "male" in a
+  //  silhouette, before a single feature is sculpted.
+  [ 1.06,  0.190, 0.230, -0.030, 0.94],
+  [ 1.00,  0.380, 0.440, -0.048, 0.90],
+  [ 0.92,  0.520, 0.600, -0.064, 0.86],
+  [ 0.80,  0.640, 0.748, -0.076, 0.83],
+  [ 0.62,  0.706, 0.836, -0.082, 0.80],
+  [ 0.40,  0.746, 0.880, -0.076, 0.78],
+  [ 0.18,  0.760, 0.900, -0.058, 0.76],
+  [ 0.00,  0.762, 0.902, -0.034, 0.76],
+  [-0.20,  0.752, 0.884, -0.012, 0.76],
+  [-0.40,  0.724, 0.822,  0.004, 0.77],
+  [-0.58,  0.672, 0.738,  0.014, 0.78],   // gonion — the corner of the jaw
+  [-0.76,  0.556, 0.616,  0.020, 0.80],
+  [-0.90,  0.392, 0.438,  0.018, 0.83],
+  [-1.02,  0.168, 0.230,  0.012, 0.88],
 ];
 
 /** Neck and shoulders: [y, half-width, half-depth, z-centre, flatten]. */
 const TORSO_PROFILE = [
   [-0.50,  0.300, 0.330, -0.180, 0.85],   // inside the jaw, never seen
   [-0.80,  0.318, 0.345, -0.185, 0.85],
-  [-1.10,  0.382, 0.375, -0.180, 0.85],
-  [-1.34,  0.472, 0.405, -0.170, 0.82],   // the neck starts to flare
-  [-1.52,  0.620, 0.440, -0.150, 0.78],   // trapezius
-  [-1.68,  0.980, 0.490, -0.130, 0.70],
-  [-1.82,  1.330, 0.530, -0.115, 0.62],
-  [-1.95,  1.560, 0.560, -0.105, 0.58],
-  [-2.10,  1.640, 0.575, -0.100, 0.56],   // chest cut
+  [-1.10,  0.428, 0.392, -0.180, 0.85],
+  [-1.34,  0.528, 0.428, -0.170, 0.82],   // the neck starts to flare
+  [-1.52,  0.712, 0.470, -0.150, 0.78],   // trapezius
+  [-1.68,  1.090, 0.516, -0.130, 0.70],
+  [-1.82,  1.470, 0.552, -0.115, 0.62],
+  [-1.95,  1.720, 0.580, -0.105, 0.58],
+  [-2.10,  1.820, 0.596, -0.100, 0.56],   // chest cut
 ];
 
 /** Catmull-Rom through a profile table: smooth, and it hits every control point. */
@@ -110,14 +114,14 @@ function faceRelief(x, y, front) {
   const ax = Math.abs(x);
 
   // --- brow and forehead -------------------------------------------------
-  const brow      =  0.052 * g2(ax, 0.26, 0.055, y,  0.170, 0.0045);
-  const glabella  =  0.020 * g2(x,  0.00, 0.012, y,  0.200, 0.0060);
-  const forehead  = -0.026 * g2(x,  0.00, 0.260, y,  0.450, 0.0550);
-  const temple    = -0.022 * g2(ax, 0.60, 0.020, y,  0.230, 0.0260);
+  const brow      =  0.078 * g2(ax, 0.26, 0.060, y,  0.158, 0.0042);
+  const glabella  =  0.030 * g2(x,  0.00, 0.014, y,  0.186, 0.0058);
+  const forehead  = -0.022 * g2(x,  0.00, 0.260, y,  0.470, 0.0550);
+  const temple    = -0.030 * g2(ax, 0.60, 0.022, y,  0.230, 0.0260);
 
   // --- eyes --------------------------------------------------------------
-  const socket    = -0.078 * g2(ax, 0.300, 0.0165, y,  0.000, 0.0085);
-  const eyeball   =  0.050 * g2(ax, 0.300, 0.0075, y, -0.005, 0.0040);
+  const socket    = -0.090 * g2(ax, 0.300, 0.0170, y, -0.004, 0.0082);
+  const eyeball   =  0.048 * g2(ax, 0.300, 0.0070, y, -0.008, 0.0036);
   const upperLid  =  0.014 * g2(ax, 0.300, 0.0095, y,  0.052, 0.0016);
   const lowerLid  =  0.010 * g2(ax, 0.300, 0.0095, y, -0.062, 0.0014);
 
@@ -135,16 +139,16 @@ function faceRelief(x, y, front) {
   const lowerLip  =  0.046 * g2(x, 0.000, 0.0260, y, -0.645, 0.0030);
 
   // --- cheeks and jaw ----------------------------------------------------
-  const zygomatic =  0.046 * g2(ax, 0.440, 0.0180, y, -0.100, 0.0210);
-  const buccal    = -0.032 * g2(ax, 0.382, 0.0150, y, -0.345, 0.0200);
+  const zygomatic =  0.056 * g2(ax, 0.448, 0.0175, y, -0.095, 0.0200);
+  const buccal    = -0.040 * g2(ax, 0.378, 0.0145, y, -0.350, 0.0195);
   // The nasolabial fold runs from beside the nostril down past the mouth.
   const foldT     = Math.max(0, Math.min(1, (-0.42 - y) / 0.24));
   const fold      = -0.022 * g2(ax, 0.132 + foldT * 0.115, 0.0022, y, -0.52, 0.0180);
-  const masseter  =  0.024 * g2(ax, 0.520, 0.0220, y, -0.430, 0.0260);
+  const masseter  =  0.040 * g2(ax, 0.530, 0.0230, y, -0.440, 0.0270);
 
-  // --- chin --------------------------------------------------------------
-  const sulcus    = -0.026 * g2(x, 0.000, 0.0340, y, -0.735, 0.0022);
-  const mental    =  0.052 * g2(x, 0.000, 0.0260, y, -0.845, 0.0090);
+  // --- chin: square, not pointed -----------------------------------------
+  const sulcus    = -0.028 * g2(x, 0.000, 0.0340, y, -0.735, 0.0022);
+  const mental    =  0.064 * g2(x, 0.000, 0.0420, y, -0.840, 0.0105);
 
   const sum = brow + glabella + forehead + temple
     + socket + eyeball + upperLid + lowerLid
@@ -424,7 +428,7 @@ export function buildCurves() {
       const c = Math.cos(a);
       const taper = 1 - c * c * 0.20;
       const upper = Math.sin(a) > 0 ? 1 : 0.60;
-      return [s * 0.292 + c * 0.152, -0.010 + Math.sin(a) * 0.062 * upper * taper];
+      return [s * 0.294 + c * 0.138, -0.012 + Math.sin(a) * 0.050 * upper * taper];
     }), 1.0, 1);
     strip(face(12, (t) => [s * (0.292 + (t - 0.5) * 0.235), 0.072 - (t - 0.5) * (t - 0.5) * 0.070]), 0.46, 1);
 
@@ -440,8 +444,18 @@ export function buildCurves() {
     // Nasolabial fold.
     strip(face(10, (t) => [s * (0.132 + t * 0.115), -0.420 - t * 0.230]), 0.40);
 
-    // Cheekbone.
-    strip(face(10, (t) => [s * (0.455 - t * 0.095), -0.120 - t * 0.250]), 0.34);
+    // Cheekbone, and the plane change below it down towards the jaw.
+    strip(face(10, (t) => [s * (0.455 - t * 0.095), -0.120 - t * 0.250]), 0.40);
+    strip(face(10, (t) => [s * (0.400 - t * 0.060), -0.330 - t * 0.260]), 0.26);
+
+    // The side plane of the forehead, from the brow up into the temple.
+    strip(face(10, (t) => [s * (0.470 + t * 0.075), 0.195 + t * 0.235]), 0.30);
+
+    // Orbital rim under the eye.
+    strip(face(12, (t) => [
+      s * (0.175 + t * 0.255),
+      -0.090 - Math.sin(t * Math.PI) * 0.030,
+    ]), 0.34);
 
     // Jawline, ear to chin.
     strip(face(18, (t) => {
@@ -476,8 +490,21 @@ export function buildCurves() {
     return [k * 0.160, -0.648 - (1 - k * k) * 0.020];
   }), 0.82);
 
-  // Chin crease.
+  // Chin crease, and the square front of the chin itself.
   strip(face(12, (t) => [(t - 0.5) * 0.210, -0.742 + (t - 0.5) * (t - 0.5) * 0.050]), 0.34);
+  strip(face(16, (t) => {
+    const k = (t - 0.5) * 2;
+    return [k * 0.195, -0.872 - (1 - k * k) * 0.038];
+  }), 0.42);
+
+  // Forehead: the brow shelf running across, and the frontal eminences.
+  strip(face(20, (t) => {
+    const k = (t - 0.5) * 2;
+    return [k * 0.495, 0.258 + (1 - k * k) * 0.022];
+  }), 0.30);
+  for (const s of [-1, 1]) {
+    strip(face(8, (t) => [s * (0.185 + t * 0.045), 0.330 + t * 0.130]), 0.22);
+  }
 
   // --- neck and shoulders ------------------------------------------------
   // The two cords running from behind the ear to the hollow of the throat.

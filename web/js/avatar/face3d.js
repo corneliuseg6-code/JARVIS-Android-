@@ -147,8 +147,10 @@ void main() {
   float rim2 = pow(max(0.0, dot(N, fill)), 2.0);
   float shade = lam * 0.92 + rim2 * 0.40;
 
-  // Fine scan lines, drifting slowly down the body.
-  float lines = 0.5 + 0.5 * sin(vModel.y * 190.0 - uTime * 1.6);
+  // Scan lines, drifting slowly down the body. Kept faint and coarse: at a
+  // fine pitch they alias into banding that buries the feature curves, which
+  // are the part that actually reads as a face.
+  float lines = 0.5 + 0.5 * sin(vModel.y * 70.0 - uTime * 1.6);
 
   // One band sweeping up the bust. Narrow: a wide one washes the face out.
   float band = exp(-pow((vModel.y - uScanY) * 19.0, 2.0));
@@ -170,7 +172,7 @@ void main() {
     + fres * 1.30                 // the rim — this is what shows the volume
     + shade * 0.88                // the modelled light on the face itself
     + band * 0.30                 // the sweep
-    + lines * 0.095               // the scan lines
+    + lines * 0.028               // the scan lines
     + tear * 0.30;
 
   alpha *= mix(0.42, 1.0, depth);
@@ -292,9 +294,9 @@ uniform float uGain;             // lower on the outer thickness passes
 void main() {
   float band = exp(-pow((vY - uScanY) * 19.0, 2.0));
   float flicker = 0.93 + 0.07 * sin(uTime * 6.1 + vY * 4.0);
-  float a = vBright * (0.80 + uEnergy * 0.55) * mix(0.26, 1.0, vDepth) * flicker;
-  a += band * 0.55 * vBright;
-  gl_FragColor = vec4(uBright * (1.25 + band * 1.4), a * uGain);
+  float a = vBright * (1.35 + uEnergy * 0.65) * mix(0.22, 1.0, vDepth) * flicker;
+  a += band * 0.60 * vBright;
+  gl_FragColor = vec4(uBright * (1.45 + band * 1.4), a * uGain);
 }`;
 
 const WASH_VS = `
@@ -614,11 +616,9 @@ export default class Face3D {
 
       // The mesh accent: a few latitude rings, so it still reads as a
       // projection rather than as a solid object.
-      if (this.quality >= 1) {
-        gl.uniform1f(p.u.uLineMode, 1);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, part.lin);
-        gl.drawElements(gl.LINES, part.lineCount, gl.UNSIGNED_SHORT, 0);
-      }
+      // No latitude-grid overlay. A regular grid laid over a face is exactly
+      // what reads as "wireframe mask" — the surface shading and the
+      // anatomical curves carry the form instead.
     });
   }
 
