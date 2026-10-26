@@ -12,7 +12,9 @@ import { t, tState } from '../i18n/index.js';
 
 const SUBSYSTEMS = [
   { key: 'server', label: 'status.server' },
-  { key: 'ollama', label: 'status.ollama' },
+  // The brain chip names whichever provider is actually in use, so a glance
+  // at it says both "is it up" and "what is answering".
+  { key: 'llm', label: 'status.brain' },
   { key: 'voice', label: 'status.voice' },
   { key: 'armory', label: 'status.armory' },
   { key: 'vision', label: 'status.vision' },
@@ -62,9 +64,21 @@ export default class Status {
     return this.latest;
   }
 
+  /** The chip's own text: the provider's name when we know it. */
+  _labelOf(item) {
+    if (item.key !== 'llm') return t(item.label);
+    return this.latest?.llm?.label || t(item.label);
+  }
+
   _stateOf(key) {
     const health = this.latest;
     if (!health) return key === 'server' ? 'disconnected' : 'unknown';
+    if (key === 'llm') {
+      const brain = health.llm || {};
+      if (brain.state !== 'connected') return brain.state || 'unknown';
+      // Connected but pointed at a model that is not there is not "fine".
+      return brain.model_ready === false ? 'error' : 'connected';
+    }
     if (key === 'vision') {
       const vision = health.vision || {};
       if (!vision.enabled) return 'disconnected';
@@ -78,14 +92,18 @@ export default class Status {
     this.host.innerHTML = '';
     for (const item of SUBSYSTEMS) {
       const chipState = this._stateOf(item.key);
+      const label = this._labelOf(item);
       const chip = document.createElement('span');
       chip.className = 'chip';
       chip.dataset.state = chipState;
-      chip.title = t(item.label) + ': ' + tState(chipState);
+      const detail = item.key === 'llm'
+        ? (this.latest?.llm?.detail || this.latest?.llm?.error || '')
+        : '';
+      chip.title = label + ': ' + tState(chipState) + (detail ? ' — ' + detail : '');
       const dot = document.createElement('span');
       dot.className = 'dot';
       const text = document.createElement('span');
-      text.textContent = t(item.label);
+      text.textContent = label;
       chip.append(dot, text);
       this.host.appendChild(chip);
     }

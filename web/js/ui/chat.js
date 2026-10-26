@@ -1,13 +1,15 @@
 /** Conversation panel: streaming answers, history, replay of speech. */
 import { api, chatStream } from '../core/api.js';
 import * as state from '../core/state.js';
-import { t } from '../i18n/index.js';
+import { t, tLLMError } from '../i18n/index.js';
 import { toast } from './toast.js';
 
 export default class Chat {
-  constructor({ voice, onActivity }) {
+  constructor({ voice, onActivity, onSend, onReply }) {
     this.voice = voice;
     this.onActivity = onActivity;
+    this.onSend = onSend;      // the dock opens itself when a message goes out
+    this.onReply = onReply;    // the collapsed dock shows the last answer
     this.messages = document.getElementById('messages');
     this.form = document.getElementById('composer');
     this.input = document.getElementById('chat-input');
@@ -141,6 +143,7 @@ export default class Chat {
 
     const cfg = state.get('config') || {};
     const language = cfg.conversation_language || 'ro';
+    this.onSend?.(text);
     this.input.value = '';
     this._autosize();
     this.addMessage('user', text);
@@ -165,15 +168,13 @@ export default class Chat {
           this.messages.scrollTop = this.messages.scrollHeight;
         },
         onError: (data) => {
-          const message = data.code === 'ollama_error' ? t('error.ollama')
-            : data.code === 'network' ? t('error.network')
-            : t('error.generic');
           bubble.classList.add('msg-error');
-          body.textContent = message + (data.detail ? ' — ' + data.detail : '');
+          body.textContent = tLLMError(data.code, data.detail);
         },
         onDone: (data) => {
           const finalText = (data.text || answer).trim();
           body.textContent = finalText;
+          this.onReply?.(finalText);
           if (finalText) this._addReplay(bubble, finalText, language);
           this.voice?.speak(finalText, language);
         },

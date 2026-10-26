@@ -50,7 +50,8 @@ def section(title):
 
 def check_modules():
     section("Backend modules")
-    for module in ("paths", "store", "config", "ollama", "mcp_client", "armory",
+    for module in ("paths", "store", "config", "ollama", "openai_client", "llm",
+                   "mcp_client", "armory",
                    "voices", "vision", "conversations", "app", "api", "main"):
         try:
             __import__(f"server.{module}")
@@ -65,11 +66,50 @@ def check_frontend():
     required = [
         "index.html", "sw.js", "manifest.webmanifest", "css/jarvis.css", "js/app.js",
         "js/avatar/index.js", "js/avatar/rings.js", "js/avatar/face.js",
+        "js/avatar/face3d.js", "js/avatar/head-mesh.js", "js/avatar/glb.js",
+        "models/head.glb", "models/head-LICENSE.txt",
         "js/i18n/index.js", "js/ui/mic.js", "js/ui/power.js", "js/ui/magnifier.js",
         "js/ui/armory.js", "js/ui/eyes.js", "js/ui/settings.js", "js/ui/chat.js",
+        "js/ui/modes.js",
     ]
     for rel in required:
         (ok if (web / rel).is_file() else bad)(f"web/{rel}")
+
+    section("Interface elements")
+    html = (web / "index.html").read_text(encoding="utf-8")
+    for element, label in (
+        ('id="avatar-canvas"', "visualiser canvas"),
+        ('id="avatar-switch"', "RINGS / FACE control"),
+        ('id="btn-mic"', "MUTE control"),
+        ('id="btn-power"', "ACTIVE / STANDBY control"),
+        ('id="drawer"', "collapsible navigation drawer"),
+        ('id="dock"', "bottom chat bar"),
+        ('id="sheet"', "panel sheet"),
+        ('id="avatar-gl"', "WebGL canvas for the hologram"),
+        ('id="btn-immersive-exit"', "immersive-mode exit"),
+        ("interactive-widget=resizes-content", "keyboard-safe viewport"),
+    ):
+        (ok if element in html else bad)(label)
+    for name in ("eyes", "watch", "holo", "focus", "reflex"):
+        (ok if f'id="fn-{name}"' in html else bad)(f"{name.upper()} switch")
+
+    section("FACE bust asset")
+    model = web / "models" / "head.glb"
+    licence = web / "models" / "head-LICENSE.txt"
+    if model.is_file():
+        head = model.read_bytes()[:4]
+        (ok if head == b"glTF" else bad)(f"head.glb is a glb ({len(model.read_bytes()) // 1024} KB)")
+    else:
+        bad("head.glb missing")
+    if licence.is_file():
+        text = licence.read_text(encoding="utf-8", errors="ignore")
+        # CC BY requires the credit to reach the user; both the licence file
+        # and the in-app credit are part of complying with it.
+        (ok if "Attribution" in text else bad)("licence file states the terms")
+        credited = (web / "js" / "i18n" / "en.js").read_text(encoding="utf-8")
+        (ok if "Lee Perry-Smith" in credited else bad)("attribution shown in Settings")
+    else:
+        bad("head-LICENSE.txt missing")
 
     section("Translations")
     reference = None
@@ -161,6 +201,23 @@ def check_server(base):
         (ok if not cfg.get("save_captures") else warn)("camera captures are not saved")
         (ok if cfg.get("avatar_mode") in ("rings", "face") else bad)(
             f"avatar mode is rings or face ({cfg.get('avatar_mode')})")
+        (ok if (cfg.get("wake_word") or "").strip() else bad)(
+            f"wake word is set ({cfg.get('wake_word')})")
+        minutes = cfg.get("focus_minutes")
+        (ok if isinstance(minutes, int) and 1 <= minutes <= 240 else bad)(
+            f"focus session length is sane ({minutes})")
+        (ok if cfg.get("llm_provider") in ("ollama", "openai") else bad)(
+            f"language-model provider is valid ({cfg.get('llm_provider')})")
+        # The settings document is readable by the browser, so no credential
+        # may ever appear in it under any name.
+        blob = json.dumps(cfg).lower()
+        leaked = [k for k in ("sk-", "api_key", "apikey") if k in blob]
+        (ok if not leaked else bad)("no API key in the settings document",
+                                    ", ".join(leaked))
+        if cfg.get("llm_provider") == "openai":
+            (ok if cfg.get("openai_cost_ack") else bad)(
+                "paid provider is only active after the cost notice")
+        print(f"{DIM}        provider details: python3 tools/test_provider.py{RESET}")
     except Exception as exc:  # noqa: BLE001
         bad("config endpoint", repr(exc))
 

@@ -1,5 +1,362 @@
 # JARVIS Android V2 — what this version contains
 
+---
+
+# V2.4 — a second brain: OpenAI alongside Ollama
+
+Ollama stays the default: local, free, offline, private. OpenAI is now
+available beside it, chosen in **Settings → Brain**.
+
+## Modular by construction
+
+* `server/openai_client.py` — the API client, standard library only, so
+  Termux still needs no `pip install` that could fail.
+* `server/llm.py` — a router over both providers. Everything above it (the
+  chat endpoint, the health report, EYES) asks the router, never a provider,
+  so a third one means writing a client and adding two lines here.
+* Both clients already yield chunks in the same shape, so there is no format
+  translation above the router.
+
+## The key never reaches the browser
+
+* It is stored in `~/.jarvis/secrets.json` (chmod 600) under a name, using
+  the same secret store the Tool Armory already uses.
+* `POST /api/llm/key` sets it. There is deliberately **no GET**: the API says
+  whether a key exists, never what it is.
+* `/api/config` strips any field that looks like a credential, so a key
+  cannot be smuggled through the settings document the browser can read.
+* `tools/test_provider.py` asserts the key is absent from the settings
+  document, the provider status and the surfaced error text.
+
+## Costs are explained before anything can be billed
+
+Settings shows an amber notice — what OpenAI charges for, that JARVIS cannot
+see your balance, that each turn resends the recent conversation so longer
+conversations cost more per reply, and a pointer to OpenAI's pricing page —
+with an acknowledgement that must be ticked first.
+
+That rule is enforced in `config.update_config()`, not only in the UI: a
+hand-edited `config.json` or a POST that skipped the interface still falls
+back to Ollama. The new `chat_history_limit` setting (default 20) makes the
+resend window adjustable, because on a metered provider it multiplies cost.
+
+## Errors say what to do
+
+Failures are mapped to stable codes and translated into all six languages:
+no key, key rejected, out of credit, rate limited, model does not exist,
+region or model not permitted, server error, timeout. The provider's own
+words are appended, which is what makes a rejected key diagnosable from a
+phone. Verified against synthetic HTTP 401/403/404/429/500 responses.
+
+## Everything else still works
+
+Romanian and the other five languages (the conversation language reaches
+OpenAI through the same system prompt), voice, conversations on disk, and
+EYES — vision routes through the provider too, so the camera works on either
+brain, and says so when a frame will be billed.
+
+The status chip now names whichever brain is active and turns amber when it
+is connected but pointed at a model that is not there. Only the provider in
+use is contacted: polling a metered API every twelve seconds to colour a chip
+would be both slow and rude.
+
+**No interface layout changed.**
+
+## Fixes found in the closing audit
+
+1. **The service worker cache name had not been bumped.** An already-installed
+   PWA would have kept serving the previous JavaScript, so the Brain panel
+   would simply never have appeared. This is the second time that bite has
+   drawn blood; the name now changes with every interface release.
+2. **The status chip was polling OpenAI every twelve seconds.** `/api/health`
+   calls the router, and on a metered provider that meant a request across the
+   internet, on mobile data, six times a minute to colour one chip. Provider
+   health is now held for 60 seconds, keyed by a hash of the endpoint and the
+   key so changing either invalidates it at once — without retaining any key
+   material. Opening the settings panel still checks for real.
+3. **The model fields were ambiguous.** "Chat model" and "Vision model" are
+   Ollama's, and editing them while OpenAI was active did nothing. They are
+   now named "Ollama chat model" and "Ollama vision model", under an
+   "Ollama & local" heading, in all six languages.
+
+`tools/test_provider.py` grew two checks for the polling behaviour: four
+background polls must make one request, and the settings panel must bypass
+the cache. 20 checks, still offline, still free.
+
+---
+
+# V2.3 — FACE is a real scanned head
+
+The procedural bust is gone from the default path. FACE now renders an actual
+3D human head scan through the hologram shader.
+
+## The model
+
+* **“Infinite”, 3D head scan by Lee Perry-Smith**
+* **Creative Commons Attribution 3.0 Unported (CC BY 3.0)** — permissive,
+  attribution required
+* Based on a work at www.triplegangers.com
+* Obtained from the three.js project (MIT), `examples/models/gltf/LeePerrySmith/`
+* Licence verified from `LeePerrySmith_License.txt`, shipped alongside the
+  model in that repository, and copied into this one at
+  `web/models/head-LICENSE.txt`
+* 9,279 vertices / 17,684 triangles / 395 KB, head **and neck and shoulders**
+
+The attribution appears in **Settings → Credits** with a link to the full
+licence. CC BY requires it, so the self-test now fails the build if either the
+licence file or the in-app credit goes missing.
+
+## Loading it
+
+`glb.js` is a ~150-line GLB reader: container header, JSON and BIN chunks,
+accessors, interleaving, and normals derived from the triangles if a file
+ships without them. No 3D library is vendored — pulling in 600KB of one to
+read three attributes out of a single mesh would cost more than it saves, and
+it would have to be cached and maintained too.
+
+`fitBust()` then measures the scan and rigs it, without touching the geometry:
+
+* the width profile finds the skull's widest slice, then the neck below it,
+  then the **top** of the flat neck run — which is the chin. Looking for "the
+  narrowest slice from the top" instead finds the crown, which is also narrow,
+  and collapses the fit to nothing. That bug made the bust invisible once.
+* the scan is scaled and centred so the crown is y = +1 and the chin y = −1
+* the nose is located as the front-most point near the centre line, and the
+  eye line and jaw hinge are placed relative to it rather than assuming the
+  scan shares the old procedural model's proportions
+* per-vertex jaw and eyelid weights are derived, with the jaw falling back to
+  zero below the chin so the mouth opens without dragging the throat
+
+## Depth prepass
+
+A hologram is additive, which is why it looks translucent — but a scanned head
+has interior geometry, and additively every bit of it shone straight through
+the face: eyeballs as spheres on the cheeks, the inside of the mouth as a slab
+across the chin. The fix is a depth prepass — fill the depth buffer with the
+nearest surface writing no colour, then run the additive colour pass against
+it — so only the surface actually facing you contributes. The context now
+requests a depth buffer for this.
+
+Curves, particles and irises still ignore depth, because they are meant to
+read through the surface.
+
+## Fallbacks
+
+Unchanged in spirit, now three deep: the scan, then the procedural bust if the
+model is missing or unreadable, then the Canvas 2D head if WebGL is refused.
+FACE never ends up blank because an asset failed. The procedural bust renders
+immediately on entry and the scan swaps in when it has downloaded, so there is
+no empty stage while a 395 KB file arrives.
+
+The service worker caches the model and its licence, so FACE works offline.
+
+## Also
+
+* **"CHIP" was never a mode.** It was `avatar.face` translated into Romanian.
+  RINGS and FACE are now untranslated product labels in all six languages.
+* The latitude-grid overlay is gone — a regular grid over a face is what read
+  as "wireframe mask".
+* Scan lines coarsened and dimmed; they were aliasing into banding.
+
+---
+
+# V2.2 — the holographic bust, immersive mode, S25 Ultra
+
+## FACE is now WebGL, not a wireframe
+
+The Canvas 2D face read as a flat mask no matter how much the geometry was
+improved, and the reason was structural: a wireframe has no surface, so it has
+no shading, and shading is what makes a head look like a head. It has been
+replaced rather than adjusted.
+
+`head-mesh.js` builds the anatomy; `face3d.js` renders it.
+
+* **Two swept surfaces** — head, and neck-into-shoulders — so the chin can sit
+  in front of the throat. A single sweep cannot do that: both would need the
+  same height.
+* **Measured cross-sections.** Fourteen rings from crown to chin, nine more
+  down to the chest, each with a half-width, a half-depth, a z-centre and a
+  flattening exponent, interpolated with a Catmull-Rom spline.
+* **Twenty-two anatomical deformers** on the face alone: brow ridge, glabella,
+  temple hollow, eye sockets, eyeballs, upper and lower lids, nasion, dorsum,
+  tip, alar wings, nostril sills, philtrum, both lips, the line between them,
+  zygomatic arch, buccal hollow, nasolabial fold, masseter, mental
+  protuberance and the crease above it — plus ears, placed sideways rather
+  than forwards.
+* **Short hair as 96 strands** sweeping back from a parting, stopping at a
+  hairline that dips over the temples and running lower behind the ears.
+* **Feature curves**: brows (four strands each), the almond of each eye and
+  its crease, the bridge of the nose and its wings, the fold beside the mouth,
+  the three lines of the lips, the jawline, the cords of the neck, the
+  collarbones. These are what the eye reads a face by.
+* **Hologram material**: fresnel rim light for volume, a key and fill
+  direction for the relief (without it a nose pointing at the camera is
+  invisible), drifting scan lines, a travelling scan band, interference
+  flicker and occasional tearing, depth tint, drifting particles and a
+  volumetric wash. Additive, no depth buffer, so front and back add together
+  and the bust is genuinely translucent.
+* **Animation in the vertex shader**: the jaw is a real rotation about a hinge
+  behind the ear, driven by a per-vertex weight and the live voice level; the
+  lids close over the eyeballs the same way. Idle yaw and pitch, and HOLO
+  tilt, ride on top.
+* WebGL 1, no extensions, no library, no build step — about five draw calls.
+
+RINGS stays Canvas 2D. The two live on separate canvases, because a canvas can
+only ever hold one kind of context. If WebGL is refused, FACE falls back to the
+old Canvas 2D head rather than leaving the stage blank.
+
+**What it is not:** an original stylised model, not a photoreal scan and not a
+likeness of anyone. There is no licensed head model in the repository and none
+is downloaded — voice models are already the largest thing here, and a
+photoreal head would dwarf them.
+
+## Immersive mode
+
+Tap the visualiser and it fills the screen: the top bar, the status strip, the
+HUD and the chat dock collapse to nothing and the stage, the only element with
+flex-grow, expands into the space. Tap again, press Escape, or use the ✕ to
+come back. The rows animate their height rather than switching off, so the
+canvas — watched by a ResizeObserver — grows with the stage instead of jumping
+at the end. A press only counts as a tap if it moved less than 12px and ended
+within 400ms, so it never fires on a HOLO drag. The backend, the microphone,
+the voice and the conversation all keep running.
+
+## Galaxy S25 Ultra
+
+* `interactive-widget=resizes-content` makes Chrome shrink the layout viewport
+  when the keyboard opens, so the chat bar stays above it.
+* A `visualViewport` listener covers browsers that do not, setting a `--kb`
+  inset — only while an input is focused, because a pinch-zoom also shrinks
+  the visual viewport and must not be mistaken for a keyboard.
+* The device pixel ratio is capped: 2 for the 2D canvas, 1.75 for WebGL. The
+  S25 Ultra reports 3.5, and a full-ratio buffer is around 12× the fill cost
+  of a 1× one for a difference invisible on a 6.9" panel. It is the single
+  biggest thing the visualiser can do to a battery.
+* A frame-time watchdog measures real frames: under ~36fps it drops the bust's
+  glow passes, then its mesh overlay and particles; over ~55fps it takes them
+  back, with hysteresis so it cannot oscillate.
+
+---
+
+# V2.1 — the interface redesign
+
+Built against the reference recording and its transcript, which were analysed
+frame by frame in this session. The backend, the Termux launcher, the Ollama
+integration, the six languages, the voice system, the camera, the MCP Tool
+Armory and the microphone privacy rules are all unchanged and still working —
+this release rebuilds the interface on top of them.
+
+## The visualiser
+
+**RINGS** was two tilted circles. It is now a layered instrument dial, drawn in
+eight passes that each move at their own speed and direction:
+
+1. an outer crown of 120 radial graduations, every fifth one long
+2. four bright arc segments with gaps, turning slowly against the crown
+3. a denser graduation ring running the other way
+4. a thin orbit ring carrying six satellites
+5. a sweep arc with a gradient tail that accelerates while JARVIS is thinking
+6. an inner dashed ring
+7. two real 3D circles, depth-sorted, for volume
+8. a reactive core with the centre label, a breathing outline, and — while
+   listening or speaking — a closed radial waveform built from the live
+   microphone level
+
+The label in the middle is a setting (`hud_label`), so it is yours to change.
+
+**FACE** was a wireframe on a hemisphere, which is why it read as a mask. It is
+now a real sculpted surface:
+
+* the head is a stack of twelve measured cross-sections (half-width, half-depth
+  and a z-centre at each height) interpolated with a Catmull-Rom spline, so it
+  has a cranium, cheekbones, a jaw angle and a chin instead of an egg outline
+* smooth deformations add the brow ridge, eye sockets, nose bridge and base,
+  philtrum, lips, cheekbones and chin, all faded out towards the ears
+* features sit at the usual proportions: eye line at mid height, base of the
+  nose two thirds down the face, mouth between that and the chin
+* every vertex carries a normal, and shading is **rim-weighted** — the segments
+  turning away from you are the bright ones, which is what gives a wireframe
+  the back-lit, glassy look instead of a flat net
+* the outline is taken from the mesh itself, at the points where the normals
+  stop facing the camera, so it stays correct as the head turns
+* blinking, a lid crease, an iris that drifts while thinking and widens while
+  listening, an easing jaw that opens with speech, and a scan sweep
+
+Both renderers stay Canvas 2D and batch their geometry: the mesh is built once
+with its normals, and the thousands of segments are stroked as four
+brightness-bucketed paths per frame rather than one path each.
+
+## Layout
+
+* The navigation is a **collapsible drawer** behind ☰, with the magnifier, the
+  language picker and EXIT inside it.
+* The **visualiser is the central focus** and the only element that grows.
+* **RINGS / FACE** sits directly below it, as a compact segmented control.
+* **MUTE** and **ACTIVE / STANDBY** sit directly underneath that.
+* **EYES · WATCH · HOLO · FOCUS · REFLEX** form one compact five-across group.
+* The oversized chat panel is now a **small bottom bar**: a rounded input, a
+  round send button, and the last thing JARVIS said shown as a subtitle. Drag
+  the handle (or tap the input) and it expands into the full conversation.
+* Tool Armory, Eyes and Settings became a **bottom sheet** instead of rows in
+  the column — which is what used to squeeze everything else.
+* Borders, padding and button sizes were cut throughout; the whole interface
+  fits a 360×800 phone with nothing off screen and nothing to scroll.
+
+## The five functions
+
+| Switch | What it really does |
+|---|---|
+| **EYES** | Opens the Eyes panel and starts the camera. Real. |
+| **WATCH** | `getDisplayMedia`. **Android browsers do not implement it**, so on a phone the switch is dimmed and says so; it works in the desktop/PWA build, where it also feeds the local vision model. |
+| **HOLO** | Drag the stage, or tilt the phone, and the projection turns. Device orientation is eased and ignores the null readings a sensorless device reports. Real. |
+| **FOCUS** | A session of `focus_minutes`. Leaving JARVIS for more than two seconds counts as a drift; JARVIS says so when you come back and gives the tally at the end. It can only see you leave *JARVIS* — a web page cannot watch other Android apps, and this does not claim to. |
+| **REFLEX** | Opens the microphone and gates every transcript on the wake word, so "Jarvis, what time is it" reaches the model as "what time is it" and anything without the wake word is ignored. Real. |
+
+Each switch reports its own state in its label. Standby, hiding the page and
+EXIT all switch every one of them off.
+
+## Backend
+
+Three settings were added and are validated and clamped on load and on save:
+`wake_word` (default `Jarvis`), `focus_minutes` (1–240, default 30) and
+`hud_label` (default `J.A.R.V.I.S.`). Everything else is untouched.
+
+## Bugs found and fixed while testing this release
+
+1. **A malformed `\u` escape** in the Romanian translation stopped the whole
+   module graph from parsing — the interface loaded blank. Found by the
+   Chromium console check, not by reading.
+2. **`[hidden]` did nothing** on any component whose CSS sets `display`: the
+   Stop button sat next to Send permanently, and the camera indicator would
+   have done the same. One global `[hidden] { display: none !important }`
+   removes the entire class of bug.
+3. **The dock handle was unreachable when the dock was closed**, because it
+   lived inside the header that only appears when it is open. It is now the
+   full top edge of the bar.
+4. **Settings overflowed a 360px screen sideways**: `<select>` and
+   `<input type=number>` outside a `.field` wrapper fell back to the platform's
+   light theme at their natural width. Controls are now styled by element
+   inside the sheet, and the voice rows wrap.
+
+## Verified in this session
+
+Chromium at 412×915 and 360×800 with a mobile user agent, against the real
+backend:
+
+* zero JavaScript errors, zero missing translation keys (177 in each of the six
+  languages)
+* no element off screen in either size; the sheet does not scroll sideways
+* the visualiser takes 645px of 915 and 530px of 800
+* HOLO turns the projection on drag and on device orientation; FOCUS counts
+  down and reports drift; REFLEX opens the mic and its wake-word gate accepts
+  "Jarvis, …" and rejects everything else; STANDBY switches all five off and
+  mutes the microphone
+* `tools/selftest.py`: 56 passed, 0 failed
+
+---
+
+# V2.0
+
 ## Important context
 
 The repository `corneliuseg6-code/JARVIS-Android-` was **empty** when this

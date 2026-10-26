@@ -47,26 +47,34 @@ the result was observed.
 | Generated `tokens.txt` | Piper models from Hugging Face ship no `tokens.txt`; the one generated from `phoneme_id_map` is **identical** to the official file (130 lines, 0 mismatches) |
 | Legacy voice names | a model named `en_US-alan-medium` that is not in the catalog is still found and used |
 
-### Frontend (Chromium, 412×915 phone viewport, fake mic/camera devices)
+### Frontend (Chromium, mobile user agent, fake mic/camera devices)
 
-39 of 39 automated checks pass, among them:
+Checked at **412×915** and **360×800** against the running backend:
 
-* loads with zero JavaScript errors, zero missing translation keys
+* loads with zero JavaScript errors, zero missing translation keys (177 keys in
+  each of the six languages)
 * RINGS renders; FACE renders; no cube button; legacy `cube` falls back to rings
-* all six languages translate menus, buttons, placeholders, status, mic/power
-  labels; the choice reaches the backend
-* magnifier: below the menu, on the left, horizontal (227×34), compact, no
-  overlap with the stage or the activity pill, and it really scales the UI
+* **nothing off screen** in either size — every visible control's rectangle is
+  inside the viewport — and the settings sheet does not scroll sideways
+  (`scrollWidth == clientWidth`)
+* the visualiser is the element that grows: 392×645 of a 412×915 screen,
+  344×530 of a 360×800 one
+* all six languages translate the drawer, the function switches, buttons,
+  placeholders, status and the mic/power labels; the choice reaches the backend
 * microphone muted at startup; MIC ON opens a live track; MUTE ends the track
   (`readyState: "ended"`), clears recognition and the restart flag; still muted
   after a reload; cannot be enabled in standby
-* standby pauses the animation loop and shows the veil; resume restarts it and
-  does **not** reopen the microphone
-* all four views switch; the armory card shows CONNECTED with its tools and no
-  credential value; chat streams an answer into the bubble
+* standby pauses the animation loop, shows the veil and switches all five
+  function switches off; resume restarts the animation and does **not** reopen
+  the microphone
+* the drawer opens and closes; every panel opens in the sheet; the armory card
+  shows CONNECTED with its tools and no credential value; chat streams an
+  answer into the bubble; the dock expands and collapses
 * camera starts, indicator appears, stopping ends the video track
-* landscape 915×412 and small phone 360×640: no horizontal overflow, controls
-  on screen
+* HOLO moves the projection on a drag and on a `deviceorientation` event;
+  FOCUS counts down and renders the drift tally; REFLEX opens the microphone
+  and its gate returns `null` for "hello there" and `"what time is it"` for
+  "Jarvis, what time is it"
 
 ---
 
@@ -118,6 +126,70 @@ the result was observed.
 
 ---
 
+## The holographic bust (FACE)
+
+| Claim | Status |
+|---|---|
+| It is a real 3D surface, shaded and animated in WebGL | **Verified.** The context comes up, the scan loads and renders, the jaw and lids animate in the vertex shader, and the fallback path was exercised by forcing a failure. |
+| It is a real scanned human head | **Yes.** 9,279 vertices, 17,684 triangles, with neck and shoulders. |
+| The licence was verified | **Yes** — CC BY 3.0, read from `LeePerrySmith_License.txt` as shipped beside the model in the three.js repository, and copied into this one. The authoritative publisher page (casual-effects.com) was **not** reachable from the build environment, so the verification rests on the licence file the redistributor ships, not on the original site. |
+| **It is a real, identifiable person** | **Yes — read this.** The scan is of Lee Perry-Smith. CC BY 3.0 grants the copyright permission, with attribution, and this is how the model is distributed in three.js, Blender demos and graphics papers. It does **not** settle likeness or personality rights, which are a separate matter from copyright and vary by country. If you are uncomfortable giving your assistant a real person's face, set `avatar_mode` to `rings`, or delete `web/models/head.glb` — FACE then falls back to the original procedural bust automatically, with no code change. |
+| It has hair | **Barely.** The scan is close-cropped, so the head reads as shaved rather than the styled hair in your reference. Nothing was added on top of it, because you asked for no more procedural face work. |
+| It runs well on a phone GPU | **Not measured.** The only renderer available in this session was SwiftShader — Chromium's pure-CPU rasteriser, with no GPU at all — where the bust manages single-digit frames. That number says nothing about an Adreno: it is a software rasteriser running a shader with heavy overdraw. What *is* in the code is a frame-time watchdog that measures real frames and sheds the glow passes, the mesh overlay and the particles if they are not being hit, and a fallback to the Canvas 2D head if WebGL is refused outright. **Check it on your phone**: if FACE feels heavy, RINGS is the cheap mode and switching is one tap. |
+| RINGS performance | **Verified at 60fps** in the same software renderer, so it has a very large margin on real hardware. |
+
+The reference video never shows FACE mode — the visualiser is RINGS for its
+whole 12 minutes — so the bust was built against the reference *image* and the
+written description, not against footage of it animating.
+
+## Immersive mode
+
+Verified: a tap on the stage expands the visualiser to the full screen and
+folds the top bar, status strip, HUD and chat dock away; a second tap, the ✕,
+or Escape restores them; it works in both RINGS and FACE; and a drag of more
+than 12px (a HOLO turn) does not trigger it.
+
+## Galaxy S25 Ultra
+
+The layout was checked at **412×915** and **360×800** CSS pixels with a mobile
+user agent, which is the viewport Chrome reports on that class of device — not
+on the device itself. Nothing was off screen, nothing scrolled sideways, and
+focusing the chat input left the dock on screen. The physical 1440×3120 panel
+is never used as a layout dimension; the device pixel ratio is capped at 2 for
+the 2D canvas and 1.75 for WebGL, deliberately.
+
+Not verified without the phone: the real on-screen keyboard, the real gesture
+bar and status bar insets, 120Hz behaviour, and real battery drain.
+
+## OpenAI — what was and was not verified
+
+| Claim | Status |
+|---|---|
+| The key cannot reach the browser | **Verified.** A probe key was stored, then every public surface was searched for it: `/api/config`, `/api/health`, `/api/diagnostics`, `/api/llm/status` and the settings document — all clean. There is no endpoint that returns a key, and `/api/config` strips credential-shaped fields. `secrets.json` is mode 600. Re-checkable with `tools/test_provider.py`. |
+| A paid provider cannot switch itself on | **Verified.** The switch is refused until the cost acknowledgement is set, and an unknown provider name falls back to Ollama. Enforced in `config.update_config()`, so this holds against a hand-edited `config.json` too. |
+| Errors are translated into something actionable | **Verified against synthetic responses** — HTTP 401, 403, 404, 429 (both out-of-credit and rate-limited), 500 and an unexpected code each map to the right stable code, and the key never appears in the surfaced text. |
+| The streaming path works end to end | **Partly.** The chat endpoint was driven with the provider set to OpenAI: it emitted `start` carrying the provider, then a structured `error` event with a code and detail, and the frontend rendered it. That exercises routing, streaming and error handling. |
+| **A real completion from OpenAI** | **Verified on the phone**, not here. `api.openai.com` is blocked by this build environment's egress proxy, so no live call could be made during development — the request shape, SSE parsing and `[DONE]` handling were written against the documented API. They were then confirmed working on a Galaxy S25 Ultra under Termux with a real key: the provider connects and answers. |
+| Cost figures | **Not quoted anywhere**, deliberately. Rates change; the interface points at OpenAI's pricing page instead of printing numbers that would go stale. |
+
+Vision (EYES) routes through the same provider, so on OpenAI a described
+frame is a billed request. The status says so.
+
+## The five function switches — what each one can actually do
+
+| Switch | On Android | Why |
+|---|---|---|
+| **EYES** | Works | `getUserMedia` on a secure origin; `127.0.0.1` counts as one. |
+| **WATCH** | **Does not work** | Android browsers do not implement `getDisplayMedia`. The switch detects this, dims itself, says so in its own label and refuses to turn on. It works in the desktop/PWA build, where it also feeds a still to the local vision model. |
+| **HOLO** | Works | Pointer drag always; `deviceorientation` additionally where the phone exposes the sensor. It turns the visualiser — it is not hand tracking, and nothing here claims it is. |
+| **FOCUS** | Works, within one real limit | A web page can only see that **JARVIS itself** lost focus (`visibilitychange`). It cannot see which other app you switched to, and it cannot watch a browser tab in a different app. So "drift" means "you left JARVIS for more than two seconds", and that is exactly what the message says. |
+| **REFLEX** | Works where speech recognition works | It gates transcripts on the wake word. The transcripts come from the browser's own speech recognition, which on most Android devices needs Google speech services and a network connection (see point 1 above). With no recognition available, REFLEX turns on, the microphone opens and the level meter moves, but no transcript arrives — and the interface says so rather than looking broken. |
+
+Standby, hiding the page and EXIT switch all five off and release every device
+they hold.
+
+---
+
 ## Known limitations by design
 
 * Chat does not yet call MCP tools automatically. The Armory connects, lists
@@ -125,7 +197,10 @@ the result was observed.
   that is the obvious next step, and pretending otherwise would be the kind of
   claim this project is trying to avoid.
 * The magnifier scales the interface (fonts, controls, panels). It does not
-  magnify the avatar canvas, which always fills its stage.
+  magnify the visualiser canvas, which always fills its stage.
+* The FACE head is an original parametric model, not a scan or a likeness of
+  anyone. It is built from a measured cross-section profile and a handful of
+  smooth deformations, so it is adjustable but it is not photoreal.
 * Speech recognition uses the browser engine. There is no offline STT; on a
   device without Google speech services, MIC ON records and animates but
   produces no transcript — the interface says so rather than looking broken.

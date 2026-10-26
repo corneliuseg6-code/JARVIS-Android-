@@ -70,6 +70,14 @@ export const api = {
   setConfig: (patch) => request('/api/config', { method: 'POST', body: patch }),
   setPower: (state) => request('/api/power', { method: 'POST', body: { state } }),
 
+  // Language-model provider. There is deliberately no getter for the key:
+  // the backend will say whether one is stored, never what it is.
+  llmStatus: () => request('/api/llm/status', { timeout: 12000 }),
+  llmModels: () => request('/api/llm/models', { timeout: 15000 }),
+  llmSetKey: (key, provider = 'openai') =>
+    request('/api/llm/key', { method: 'POST', body: { provider, key } }),
+  llmClearKey: () => request('/api/llm/key', { method: 'DELETE' }),
+
   voices: () => request('/api/voices'),
   downloadVoice: (voice) => request('/api/voices/download', { method: 'POST', body: { voice, confirm: true } }),
   downloadStatus: (voice) => request('/api/voices/download/' + encodeURIComponent(voice)),

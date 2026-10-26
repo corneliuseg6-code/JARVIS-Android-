@@ -71,6 +71,27 @@ export function t(key, vars) {
   return value;
 }
 
+/**
+ * Translate a provider failure.
+ *
+ * The backend sends a stable code rather than a sentence, so the same failure
+ * reads correctly in all six languages. `detail` is the provider's own words
+ * and is appended when it adds anything — a rejected key is much easier to
+ * fix when you can see what OpenAI said about it.
+ */
+const LLM_CODES = [
+  'no_key', 'auth', 'quota', 'rate_limit', 'model_missing', 'forbidden', 'server', 'timeout',
+];
+
+export function tLLMError(code, detail) {
+  let message;
+  if (code === 'ollama_error') message = t('error.ollama');
+  else if (code === 'network') message = t('error.network');
+  else if (LLM_CODES.includes(code)) message = t('error.llm.' + code);
+  else message = t('error.generic');
+  return detail ? `${message} — ${detail}` : message;
+}
+
 /** Translate a backend connection state ("connected", "error", ...). */
 export function tState(state) {
   const key = 'state.' + String(state || 'unknown');

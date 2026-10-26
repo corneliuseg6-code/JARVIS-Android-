@@ -16,7 +16,9 @@ const state = {
   power: 'active',      // active | standby
   micOn: false,         // ALWAYS false at startup
   cameraOn: false,
-  view: 'chat',         // chat | armory | eyes | settings
+  view: 'home',         // home | armory | eyes | settings
+  dockOpen: false,
+  immersive: false,     // visualiser fills the screen, chrome folded away
   avatarMode: 'rings',  // rings | face
   zoom: 1,
   conversationId: '',

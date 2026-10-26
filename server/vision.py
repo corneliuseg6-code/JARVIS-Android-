@@ -12,7 +12,7 @@ import binascii
 import time
 from typing import Any
 
-from . import config, ollama, paths
+from . import config, llm, paths
 
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
 
@@ -28,19 +28,22 @@ PROMPTS = {
 
 def status() -> dict[str, Any]:
     cfg = config.get_config()
-    model = cfg.get("vision_model") or ""
-    health = ollama.health()
-    installed = model in health.get("models", []) or any(
-        m.split(":")[0] == model.split(":")[0] for m in health.get("models", [])
-    )
+    provider = llm.provider()
+    model = llm.vision_model()
+    ready, note = llm.vision_ready()
     return {
         "enabled": bool(cfg.get("vision_enabled")),
+        "provider": provider,
         "model": model,
-        "model_installed": installed,
-        "ollama": health.get("state"),
+        # Kept under its old name so the frontend's "model is not installed"
+        # message keeps working for both providers.
+        "model_installed": ready,
+        "ollama": llm.health().get("state") if provider == llm.OLLAMA else "disconnected",
         "local_only": bool(cfg.get("vision_local_only", True)),
         "save_captures": bool(cfg.get("save_captures")),
-        "note": "" if installed else f"Model not pulled. Run: ollama pull {model}",
+        # On a paid provider, sending a frame costs money — say so plainly.
+        "billed": provider == llm.OPENAI,
+        "note": note,
     }
 
 
@@ -77,7 +80,7 @@ def describe(image_data_url: str, language: str = "en", prompt: str = "") -> dic
         }
     ]
     try:
-        text = ollama.chat_once(info["model"], messages, timeout=180.0)
-    except ollama.OllamaError as exc:
-        return {"ok": False, "error": "ollama_error", "detail": str(exc)[:300]}
-    return {"ok": True, "text": text.strip()}
+        text = llm.chat_once(messages, model=info["model"], timeout=180.0)
+    except llm.LLMError as exc:
+        return {"ok": False, "error": exc.code, "provider": exc.provider, "detail": exc.detail[:300]}
+    return {"ok": True, "text": text.strip(), "provider": info["provider"]}

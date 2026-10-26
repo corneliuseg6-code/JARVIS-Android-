@@ -32,7 +32,7 @@ or, from git:
 ```bash
 git clone https://github.com/corneliuseg6-code/JARVIS-Android- jarvis
 cd jarvis
-git checkout claude/jarvis-android-v2-upgrade-3whm86
+git checkout claude/new-session-doztv0
 ```
 
 Optional guided setup (it asks before each optional component):
@@ -40,6 +40,36 @@ Optional guided setup (it asks before each optional component):
 ```bash
 ./install-termux.sh
 ```
+
+### Updating an install you already have
+
+This branch is kept separate from `main`, so it never touches the copy already
+on your phone unless you ask for it. To pull the redesigned interface into an
+existing clone:
+
+```bash
+cd ~/jarvis
+./stop.sh                                   # if it is running
+git fetch origin claude/new-session-doztv0
+git checkout claude/new-session-doztv0
+git pull origin claude/new-session-doztv0
+chmod +x start.sh stop.sh install-termux.sh
+./start.sh
+```
+
+To try it **beside** your current install instead of upgrading it, clone it to
+a second folder and run it on a second port — both can be installed as PWAs:
+
+```bash
+cd ~
+git clone -b claude/new-session-doztv0 https://github.com/corneliuseg6-code/JARVIS-Android- jarvis-v21
+cd jarvis-v21
+chmod +x start.sh stop.sh install-termux.sh
+JARVIS_PORT=8788 ./start.sh                 # then open http://127.0.0.1:8788
+```
+
+Your settings, conversations and voices live in `~/.jarvis/`, outside the
+project folder, so both copies read the same data and neither can delete it.
 
 ---
 
@@ -66,6 +96,32 @@ Stop it with `Ctrl-C`, or from another Termux session:
 
 ---
 
+## 3b. Finding your way around
+
+* **☰** (top left) opens the navigation drawer: Home, Tool Armory, Eyes,
+  Settings, the language picker, the magnifier and EXIT.
+* The **visualiser** fills the middle of the screen. **RINGS / FACE** directly
+  below it switches between the two, and the choice is saved. RINGS is the
+  instrument dial; FACE is the holographic bust, drawn with WebGL.
+* **Tap the visualiser** and it takes the whole screen, with every control
+  folded away. Tap again — or press the ✕ in the corner — to bring them back.
+  JARVIS keeps listening and talking the whole time.
+* **MUTE** and **ACTIVE / STANDBY** are the two wide buttons under that. The
+  microphone is muted every time JARVIS starts, and nothing re-opens it on its
+  own.
+* The five small switches are **EYES** (camera), **WATCH** (screen capture —
+  greyed out on Android, see LIMITATIONS.md), **HOLO** (drag or tilt to turn
+  the projection), **FOCUS** (a timed session that counts how often you leave
+  JARVIS) and **REFLEX** (hands-free: the mic stays open and only a sentence
+  containing the wake word is acted on).
+* The **bar at the bottom** is the chat. Type in it, or drag its handle up to
+  open the full conversation with History and New.
+
+Settings → Assistant holds the wake word, the length of a FOCUS session and the
+text in the middle of the rings.
+
+---
+
 ## 4. Ollama (the AI answers)
 
 JARVIS talks to Ollama over HTTP. In a **second Termux session**:
@@ -88,6 +144,36 @@ models Ollama reports, so you can see what is actually installed.
 
 Without Ollama, the interface still works — chat answers report
 "Ollama is not responding" instead of pretending.
+
+---
+
+## 4b. OpenAI instead of Ollama (optional, **paid**)
+
+Ollama stays the default and stays free. If you want OpenAI as well:
+
+1. Create a key at `platform.openai.com` → API keys.
+2. **Set a spend limit** in your OpenAI account first. JARVIS cannot see your
+   balance and cannot stop you from spending.
+3. In JARVIS: **Settings → Brain**, read the cost notice, tick the
+   acknowledgement, paste the key, press Save, then set the model.
+4. Switch *Language model* to **OpenAI — paid API**.
+
+What it costs, plainly: OpenAI bills by the amount of text sent and received,
+on every request. Because each turn resends the recent conversation, a long
+conversation costs more per reply than a short one — *Messages resent each
+turn* in the same panel controls that window. Check current rates on OpenAI's
+pricing page; they change, so this file does not quote them.
+
+The key is written to `~/.jarvis/secrets.json` (chmod 600) on the phone. It is
+never sent to the browser and never appears in any API response — there is no
+endpoint that returns it. Removing the key also switches JARVIS back to
+Ollama, so nothing is left failing.
+
+To check all of this without spending anything:
+
+```bash
+python3 tools/test_provider.py
+```
 
 ---
 
@@ -221,9 +307,17 @@ command: python3 ~/jarvis/tools/mock_mcp_server.py
 | Page loads but nothing reacts | open Chrome DevTools (`chrome://inspect` from a PC) — JARVIS also posts JS errors to the Termux console |
 | "Server: Disconnected" chip | the backend died; look at the Termux output |
 | "Ollama: Disconnected" | `ollama serve` is not running, or the address in Settings is wrong |
+| "The API key was rejected" | the key is wrong, revoked, or belongs to another account — paste it again in Settings → Brain |
+| "The OpenAI account is out of credit" | add credit at platform.openai.com; JARVIS cannot see your balance |
+| "That model name does not exist" | fix the model in Settings → Brain; the field suggests the models your key can actually use |
+| The brain chip is amber | connected, but the chosen model is not available to you |
 | "Voice: Disconnected" | no sherpa-onnx or no model — Settings → Voice shows which |
 | Microphone does nothing | Chrome blocks the mic on non-secure origins; use `127.0.0.1`, and grant the permission |
-| Everything is tiny / too large | the magnifier under the main menu, or its ↺ reset |
+| Everything is tiny / too large | the magnifier in the drawer (☰), or its ↺ reset |
+| WATCH is greyed out | Android browsers have no screen-capture API; the switch says so. It works in the desktop/PWA build. |
+| FACE feels heavy or warm | It is a shaded 3D bust. JARVIS sheds its glow passes automatically below ~36fps, but RINGS is the cheap mode — switching is one tap. *Reduced animations* in Settings lowers both. |
+| FACE looks like the old flat head | WebGL was refused, so it fell back to the Canvas 2D face. Check `chrome://gpu`, and that hardware acceleration is on. |
+| REFLEX hears nothing | the browser's speech recognition needs Google speech services and a network connection on most devices (see LIMITATIONS.md) |
 
 A full diagnosis in one command:
 
