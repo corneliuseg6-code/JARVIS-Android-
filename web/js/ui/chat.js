@@ -5,11 +5,11 @@ import { t, tLLMError } from '../i18n/index.js';
 import { toast } from './toast.js';
 
 export default class Chat {
-  constructor({ voice, onActivity, onSend, onReply }) {
+  constructor({ voice, onActivity, onSend, onReply } = {}) {
     this.voice = voice;
     this.onActivity = onActivity;
-    this.onSend = onSend;      // the dock opens itself when a message goes out
-    this.onReply = onReply;    // the collapsed dock shows the last answer
+    this.onSend = onSend;
+    this.onReply = onReply;
     this.messages = document.getElementById('messages');
     this.form = document.getElementById('composer');
     this.input = document.getElementById('chat-input');
@@ -20,6 +20,9 @@ export default class Chat {
     this.historyList = document.getElementById('history-list');
     this.stream = null;
     this.pending = null;
+    this._stick = true;        // follow a streaming answer until the reader scrolls up
+
+    this.messages?.addEventListener('scroll', () => { this._stick = this._atBottom(); }, { passive: true });
 
     this.form?.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -35,6 +38,24 @@ export default class Chat {
     this.stopBtn?.addEventListener('click', () => this.abort());
     this.newBtn?.addEventListener('click', () => this.newConversation());
     this.historyBtn?.addEventListener('click', () => this.toggleHistory());
+  }
+
+  /**
+   * Follow the conversation only when the reader is already at the end of it.
+   *
+   * The panel is tall enough now to read back through a long answer while the
+   * next one streams in; yanking it to the bottom on every token would make
+   * that impossible.
+   */
+  _atBottom() {
+    const box = this.messages;
+    if (!box) return false;
+    return box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+  }
+
+  _follow(force) {
+    if (!this.messages) return;
+    if (force || this._stick) this.messages.scrollTop = this.messages.scrollHeight;
   }
 
   _autosize() {
@@ -128,7 +149,7 @@ export default class Chat {
     body.textContent = text;
     el.append(role, body);
     this.messages.appendChild(el);
-    this.messages.scrollTop = this.messages.scrollHeight;
+    this._follow(true);
     return body;
   }
 
@@ -144,6 +165,7 @@ export default class Chat {
     const cfg = state.get('config') || {};
     const language = cfg.conversation_language || 'ro';
     this.onSend?.(text);
+    this._stick = true;        // sending is asking to see the answer
     this.input.value = '';
     this._autosize();
     this.addMessage('user', text);
@@ -165,7 +187,7 @@ export default class Chat {
         onToken: (chunk) => {
           answer += chunk;
           body.textContent = answer;
-          this.messages.scrollTop = this.messages.scrollHeight;
+          this._follow(false);
         },
         onError: (data) => {
           bubble.classList.add('msg-error');

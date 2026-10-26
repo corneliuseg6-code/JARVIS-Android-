@@ -2,6 +2,51 @@
 
 ---
 
+# V2.6 — console and conversation
+
+The home screen is now two things: an instrument band at the top and the
+conversation under it. UI only — no backend file is touched.
+
+| # | Asked for | What it is |
+|---|-----------|------------|
+| 1 | Avatar smaller, upper-right | A 64–92px panel in the console's top-right corner, on its own WebGL surface |
+| 2 | Rings larger, higher, centred | 284px on a Galaxy S25 Ultra (was 229px), centred on the screen's axis and sitting under both rails |
+| 3 | Status indicators down the left | SERVER, OLLAMA (the active brain), VOICE, TOOLS, VISION, stacked |
+| 4 | Controls down the right | RINGS/FACE, MUTE, ACTIVE, EYES, WATCH, HOLO, FOCUS, REFLEX — eight 26px rows, none wider than a third of the screen |
+| 5 | A large conversation panel | Always open, 482px on an S25 Ultra: eight messages at once, momentum scrolling |
+| 6 | Only the chat bar at the bottom | The dock is the composer and nothing else — grip, header and ticker are gone |
+
+## The dial runs behind the rails
+
+A three-column band on a 412px screen cannot both centre a larger dial and
+keep it clear of the rails. The rails are therefore translucent
+(`--rail-fill`) and the dial is laid across the whole console and centred in
+it, so the rings read as continuous behind the controls — as in the
+reference — instead of being chopped off by a solid edge.
+
+## Reading a long answer
+
+The message list follows a streaming answer only while you are already at the
+bottom of it. Scroll up to re-read and the stream no longer yanks you back;
+sending the next message opts you back in.
+
+## Typing
+
+While the keyboard is up the hologram gives its corner back and the control
+rail moves up into it, so the conversation keeps 257px rather than 162px on
+an S25 Ultra (142px rather than 58px on a 360×800 phone). Both kinds of
+Android are covered: the viewport-shrinking kind through a media query, the
+older kind through the `--kb` measurement the app already made.
+
+## One bug fixed on the way
+
+Immersive mode came up as a black screen. The dial is now a grid item centred
+in its area, and Chromium shrink-to-fits a `position: fixed` box that carries
+a self-alignment other than `stretch` — with absolutely positioned children
+that meant a 0×0 stage. The immersive rule resets `place-self` as well.
+
+---
+
 # V2.5 — the annotated reference layout
 
 The home screen is now stacked in the order of the annotated reference, top

@@ -20,7 +20,7 @@
 <body>
 <noscript class="noscript">JARVIS needs JavaScript enabled.</noscript>
 
-<div id="app" class="app" data-view="home" data-power="active" data-dock="collapsed">
+<div id="app" class="app" data-view="home" data-power="active">
 
   <!-- ===================== top bar ===================== -->
   <header class="topbar">
@@ -44,23 +44,101 @@
   </header>
 
   <!-- ===================== workspace =====================
-       One centred column holding the reference's stack, in its order:
-       avatar, focus timer, rings, status, mode, functions. The chat bar is
-       the only thing below it. -->
+       Top band: the instrument console — the rings centred, the status rail
+       down the left, the control rail down the right, the hologram in the
+       upper-right corner. Everything below it is conversation. -->
   <div class="workspace">
-  <div class="hud-col">
 
-  <!-- ============ 1. avatar / hologram (small screen) ============
-       Its own WebGL surface, so the face can be on screen at the same time
-       as the rings below rather than instead of them. -->
-  <section class="avatar-card" id="avatar-card">
-    <canvas id="avatar-card-gl" class="avatar-canvas" aria-hidden="true"></canvas>
-    <span class="card-tag" aria-hidden="true" data-i18n="app.title">JARVIS</span>
+  <section class="console" id="console">
+
+    <!-- ============ 3. status rail, down the left ============
+         Filled by ui/status.js: SERVER, OLLAMA (the active brain), VOICE,
+         TOOLS, VISION, one under the other. -->
+    <div class="rail rail-left" id="status-chips" role="status" aria-live="polite"></div>
+
+    <!-- ============ 1. avatar / hologram, upper right ============
+         Its own WebGL surface, so the face can be on screen at the same time
+         as the rings rather than instead of them. -->
+    <section class="avatar-card" id="avatar-card">
+      <canvas id="avatar-card-gl" class="avatar-canvas" aria-hidden="true"></canvas>
+    </section>
+
+    <!-- ============ 4. control rail, down the right ============ -->
+    <div class="rail rail-right">
+      <div class="mode-row" id="avatar-switch" role="group" data-i18n-aria="avatar.mode">
+        <button type="button" class="mode-btn is-active" data-mode="rings" data-i18n="avatar.rings">Rings</button>
+        <button type="button" class="mode-btn" data-mode="face" data-i18n="avatar.face">Face</button>
+      </div>
+
+      <button class="ctl ctl-mic is-muted" id="btn-mic" type="button" aria-pressed="false">
+        <span class="ctl-dot" aria-hidden="true"></span>
+        <span class="ctl-label" id="mic-label" data-i18n="mic.mute">Mute</span>
+      </button>
+      <button class="ctl ctl-power is-active" id="btn-power" type="button" aria-pressed="true">
+        <span class="ctl-dot" aria-hidden="true"></span>
+        <span class="ctl-label" id="power-label" data-i18n="power.active">Active</span>
+      </button>
+
+      <div class="fn-grid" id="fn-grid" role="group" data-i18n-aria="fn.group">
+        <button class="fn" type="button" id="fn-eyes" data-fn="eyes" aria-pressed="false">
+          <span class="fn-ico" aria-hidden="true">◉</span>
+          <span class="fn-name" data-i18n="fn.eyes">Eyes</span>
+          <span class="fn-state" data-i18n="common.off">Off</span>
+        </button>
+        <button class="fn" type="button" id="fn-watch" data-fn="watch" aria-pressed="false">
+          <span class="fn-ico" aria-hidden="true">▣</span>
+          <span class="fn-name" data-i18n="fn.watch">Watch</span>
+          <span class="fn-state" data-i18n="common.off">Off</span>
+        </button>
+        <button class="fn" type="button" id="fn-holo" data-fn="holo" aria-pressed="false">
+          <span class="fn-ico" aria-hidden="true">✦</span>
+          <span class="fn-name" data-i18n="fn.holo">Holo</span>
+          <span class="fn-state" data-i18n="common.off">Off</span>
+        </button>
+        <button class="fn" type="button" id="fn-focus" data-fn="focus" aria-pressed="false">
+          <span class="fn-ico" aria-hidden="true">◎</span>
+          <span class="fn-name" data-i18n="fn.focus">Focus</span>
+          <span class="fn-state" data-i18n="common.off">Off</span>
+        </button>
+        <button class="fn" type="button" id="fn-reflex" data-fn="reflex" aria-pressed="false">
+          <span class="fn-ico" aria-hidden="true">≋</span>
+          <span class="fn-name" data-i18n="fn.reflex">Reflex</span>
+          <span class="fn-state" data-i18n="common.off">Off</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ============ 2. the rings, centred ============
+         Laid over the whole console and centred in it, so the dial can be
+         wider than the gap between the rails — the rails sit on top of its
+         outer crown, as in the reference. Last in source order so the rails
+         keep the taps that belong to them. -->
+    <main class="stage" id="stage">
+      <!-- Two canvases: a canvas can hold only one kind of context, and RINGS
+           is Canvas 2D while FACE is WebGL. Only the active one is shown. -->
+      <canvas id="avatar-canvas" class="avatar-canvas" aria-hidden="true"></canvas>
+      <canvas id="avatar-gl" class="avatar-canvas" aria-hidden="true" hidden></canvas>
+
+      <div class="stage-tag" id="stage-tag" aria-hidden="true">RINGS</div>
+      <button class="stage-exit" id="btn-immersive-exit" type="button" hidden
+              data-i18n-aria="immersive.exit" data-i18n-title="immersive.exit">✕</button>
+      <div class="stage-note" id="stage-note" hidden></div>
+
+      <div class="standby-veil" id="standby-veil" hidden>
+        <div class="standby-box">
+          <div class="standby-title" data-i18n="power.standby">Standby</div>
+          <p class="standby-text" data-i18n="power.inStandby"></p>
+          <p class="standby-hint" data-i18n="power.resumeHint"></p>
+          <button class="btn btn-primary" id="btn-resume" type="button" data-i18n="power.resume">Resume</button>
+        </div>
+      </div>
+    </main>
   </section>
 
-  <!-- ============ 2. timer / focus (block under the avatar) ============
-       Shown only while a session runs: an idle timer would be exactly the
-       wasted space this layout is meant to remove. -->
+  <!-- ============ focus timer ============
+       Between the console and the conversation, and only while a session
+       runs: an idle timer would be exactly the wasted space this layout is
+       meant to remove. -->
   <section class="focus-block" id="focus-block" hidden>
     <button class="focus-btn" id="btn-focus-pause" type="button"
             data-i18n-aria="fn.focusPause" data-i18n-title="fn.focusPause">❚❚</button>
@@ -74,107 +152,25 @@
     </span>
   </section>
 
-  <!-- ===================== 3. rings visualiser ===================== -->
-  <main class="stage" id="stage">
-    <!-- Two canvases: a canvas can hold only one kind of context, and RINGS is
-         Canvas 2D while FACE is WebGL. Only the active one is shown. -->
-    <canvas id="avatar-canvas" class="avatar-canvas" aria-hidden="true"></canvas>
-    <canvas id="avatar-gl" class="avatar-canvas" aria-hidden="true" hidden></canvas>
-
-    <div class="stage-tag" id="stage-tag" aria-hidden="true">RINGS</div>
-    <button class="stage-exit" id="btn-immersive-exit" type="button" hidden
-            data-i18n-aria="immersive.exit" data-i18n-title="immersive.exit">✕</button>
-    <div class="stage-note" id="stage-note" hidden></div>
-
-    <div class="standby-veil" id="standby-veil" hidden>
-      <div class="standby-box">
-        <div class="standby-title" data-i18n="power.standby">Standby</div>
-        <p class="standby-text" data-i18n="power.inStandby"></p>
-        <p class="standby-hint" data-i18n="power.resumeHint"></p>
-        <button class="btn btn-primary" id="btn-resume" type="button" data-i18n="power.resume">Resume</button>
-      </div>
-    </div>
-  </main>
-
-  <!-- ============ connection status (slim, scrollable) ============ -->
-  <div class="statusbar" id="status-chips" role="status" aria-live="polite"></div>
-
-  <!-- ===================== HUD controls ===================== -->
-  <div class="hud">
-    <!-- mode: directly under the visualiser -->
-    <div class="mode-row" id="avatar-switch" role="group" data-i18n-aria="avatar.mode">
-      <button type="button" class="mode-btn is-active" data-mode="rings" data-i18n="avatar.rings">Rings</button>
-      <button type="button" class="mode-btn" data-mode="face" data-i18n="avatar.face">Face</button>
-    </div>
-
-    <!-- mic + power: directly underneath -->
-    <div class="power-row">
-      <button class="ctl ctl-mic is-muted" id="btn-mic" type="button" aria-pressed="false">
-        <span class="ctl-dot" aria-hidden="true"></span>
-        <span class="ctl-label" id="mic-label" data-i18n="mic.mute">Mute</span>
-      </button>
-      <button class="ctl ctl-power is-active" id="btn-power" type="button" aria-pressed="true">
-        <span class="ctl-dot" aria-hidden="true"></span>
-        <span class="ctl-label" id="power-label" data-i18n="power.active">Active</span>
-      </button>
-    </div>
-
-    <!-- the five functions, compact -->
-    <div class="fn-grid" id="fn-grid" role="group" data-i18n-aria="fn.group">
-      <button class="fn" type="button" id="fn-eyes" data-fn="eyes" aria-pressed="false">
-        <span class="fn-ico" aria-hidden="true">◉</span>
-        <span class="fn-name" data-i18n="fn.eyes">Eyes</span>
-        <span class="fn-state" data-i18n="common.off">Off</span>
-      </button>
-      <button class="fn" type="button" id="fn-watch" data-fn="watch" aria-pressed="false">
-        <span class="fn-ico" aria-hidden="true">▣</span>
-        <span class="fn-name" data-i18n="fn.watch">Watch</span>
-        <span class="fn-state" data-i18n="common.off">Off</span>
-      </button>
-      <button class="fn" type="button" id="fn-holo" data-fn="holo" aria-pressed="false">
-        <span class="fn-ico" aria-hidden="true">✦</span>
-        <span class="fn-name" data-i18n="fn.holo">Holo</span>
-        <span class="fn-state" data-i18n="common.off">Off</span>
-      </button>
-      <button class="fn" type="button" id="fn-focus" data-fn="focus" aria-pressed="false">
-        <span class="fn-ico" aria-hidden="true">◎</span>
-        <span class="fn-name" data-i18n="fn.focus">Focus</span>
-        <span class="fn-state" data-i18n="common.off">Off</span>
-      </button>
-      <button class="fn" type="button" id="fn-reflex" data-fn="reflex" aria-pressed="false">
-        <span class="fn-ico" aria-hidden="true">≋</span>
-        <span class="fn-name" data-i18n="fn.reflex">Reflex</span>
-        <span class="fn-state" data-i18n="common.off">Off</span>
-      </button>
-    </div>
-  </div>
-
-  </div><!-- /hud-col -->
-  </div><!-- /workspace -->
-
-  <!-- ===================== chat dock ===================== -->
-  <section class="dock" id="dock" data-panel="chat">
-    <button class="dock-grip" id="btn-dock" type="button"
-            data-i18n-aria="chat.expand" aria-expanded="false">
-      <span class="grip-bar" aria-hidden="true"></span>
-    </button>
-
-    <div class="dock-head">
-      <h2 data-i18n="nav.chat">Chat</h2>
-      <div class="dock-head-actions">
-        <button class="btn btn-ghost btn-sm" id="btn-history" type="button" data-i18n="chat.history">History</button>
-        <button class="btn btn-ghost btn-sm" id="btn-new-chat" type="button" data-i18n="chat.new">New</button>
-      </div>
+  <!-- ============ 5. the conversation ============
+       Always open, and the only thing that grows: it takes every pixel the
+       console and the chat bar do not need. -->
+  <section class="chat-panel" id="chat-panel">
+    <div class="chat-head">
+      <button class="btn btn-ghost btn-sm" id="btn-history" type="button" data-i18n="chat.history">History</button>
+      <button class="btn btn-ghost btn-sm" id="btn-new-chat" type="button" data-i18n="chat.new">New</button>
     </div>
 
     <div class="messages" id="messages" aria-live="polite">
       <p class="empty" data-i18n="chat.empty"></p>
     </div>
     <div class="history-list" id="history-list" hidden></div>
+  </section>
 
-    <!-- collapsed: the last line JARVIS said, like a subtitle -->
-    <div class="dock-ticker" id="dock-ticker" aria-hidden="true"></div>
+  </div><!-- /workspace -->
 
+  <!-- ===================== 6/7. the chat bar, and nothing else ========= -->
+  <section class="dock" id="dock" data-panel="chat">
     <form class="composer" id="composer" autocomplete="off">
       <textarea id="chat-input" rows="1" data-i18n-placeholder="chat.placeholder"></textarea>
       <button class="round round-send" id="btn-send" type="submit"

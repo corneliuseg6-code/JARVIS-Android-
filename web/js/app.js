@@ -6,9 +6,10 @@
  * the whole page dying at the first error (the classic "buttons do nothing"
  * symptom).
  *
- * The shell is: top bar, status strip, visualiser, HUD, chat dock — with the
- * navigation as a drawer and the panels as a sheet, so neither can steal
- * vertical space from the visualiser.
+ * The shell is: top bar, the console band (rings between a status rail and a
+ * control rail, hologram in the corner), the conversation, and the chat bar —
+ * with the navigation as a drawer and the panels as a sheet, so neither can
+ * steal space from the other two.
  */
 import { api } from './core/api.js';
 import * as state from './core/state.js';
@@ -73,13 +74,6 @@ function setNav(open) {
   if (scrim) scrim.hidden = !open && !SHEET_VIEWS.includes(state.get('view'));
 }
 
-function setDock(expanded) {
-  root?.setAttribute('data-dock', expanded ? 'expanded' : 'collapsed');
-  document.getElementById('btn-dock')?.setAttribute('aria-expanded', String(expanded));
-  state.set({ dockOpen: expanded });
-  requestAnimationFrame(() => app.avatar?.resize());
-}
-
 /** 'home' shows the visualiser alone; the rest open the bottom sheet. */
 function setView(view) {
   if (!SHEET_VIEWS.includes(view)) view = 'home';
@@ -129,7 +123,6 @@ function setImmersive(on) {
   if (exit) exit.hidden = !on;
   if (on) {
     setNav(false);
-    setDock(false);
     if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
   }
   // Follow the rows while they fold, so the canvas grows with the stage
@@ -185,6 +178,9 @@ function trackViewport() {
       ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
       : 0;
     document.documentElement.style.setProperty('--kb', keyboard + 'px');
+    // The console sheds the hologram while the keyboard is up, so the
+    // conversation does not shrink to a couple of lines.
+    root?.setAttribute('data-kb', keyboard > 120 ? 'on' : 'off');
     app.avatar?.resize();
   };
   vv.addEventListener('resize', apply);
@@ -315,11 +311,6 @@ async function boot() {
   app.chat = guard('chat', () => new Chat({
     voice: app.voice,
     onActivity: setActivity,
-    onSend: () => setDock(true),
-    onReply: (text) => {
-      const ticker = document.getElementById('dock-ticker');
-      if (ticker) ticker.textContent = text || '';
-    },
   }));
   app.armory = guard('armory', () => new Armory());
   app.settings = guard('settings', () => new Settings({
@@ -374,11 +365,6 @@ async function boot() {
     button.addEventListener('click', () => applyAvatarMode(button.dataset.mode, { persist: true }));
   });
 
-  document.getElementById('btn-dock')?.addEventListener('click', () => {
-    setDock(root?.getAttribute('data-dock') !== 'expanded');
-  });
-  document.getElementById('chat-input')?.addEventListener('focus', () => setDock(true));
-
   document.getElementById('btn-exit')?.addEventListener('click', onExit);
 
   wireStageTap();
@@ -393,7 +379,6 @@ async function boot() {
     if (state.get('immersive')) setImmersive(false);
     else if (root?.getAttribute('data-nav') === 'open') setNav(false);
     else if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
-    else if (root?.getAttribute('data-dock') === 'expanded') setDock(false);
   });
 
   on('power:standby', () => {
@@ -412,7 +397,6 @@ async function boot() {
   setActivity('idle');
   setView('home');
   setNav(false);
-  setDock(false);
   root?.setAttribute('data-immersive', 'off');
 
   const problems = missingKeys();
@@ -462,6 +446,6 @@ boot().catch((err) => {
 
 // Exposed for debugging from the Chrome console on the phone.
 window.JARVIS = {
-  app, state, setView, setActivity, setDock, setNav, setImmersive,
+  app, state, setView, setActivity, setNav, setImmersive,
   applyLanguage, applyAvatarMode,
 };

@@ -17,7 +17,6 @@ const state = {
   micOn: false,         // ALWAYS false at startup
   cameraOn: false,
   view: 'home',         // home | armory | eyes | settings
-  dockOpen: false,
   immersive: false,     // visualiser fills the screen, chrome folded away
   avatarMode: 'rings',  // rings | face
   zoom: 1,

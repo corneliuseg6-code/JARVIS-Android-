@@ -1,17 +1,19 @@
 /* ==========================================================================
    JARVIS Android V2 — holographic interface, phone first.
 
-   The whole screen is one flex column:
+   The whole screen is three rows:
 
        top bar            compact: menu, name, activity, settings
-       status strip       slim connection chips, scrolls sideways
-       STAGE              the visualiser — the only element that grows
-       HUD                RINGS/FACE, then MUTE/ACTIVE, then the five functions
-       chat dock          one bar; it expands upward when opened
+       CONSOLE            the instrument band — rings centred, status rail
+                          down the left, control rail down the right, the
+                          hologram in the upper-right corner
+       conversation       always open; the only element that grows
+       chat bar           the composer, and nothing else
 
-   Nothing else is allowed to take vertical space from the stage. Panels are
-   overlays (drawer from the left, sheet from the bottom), not rows in the
-   column, which is what used to push the interface off a phone screen.
+   The console sizes itself from its rails, so every pixel it does not need
+   belongs to the conversation. Panels are overlays (drawer from the left,
+   sheet from the bottom), not rows in the column, which is what used to push
+   the interface off a phone screen.
 
    Everything scales from --zoom, driven by the magnifier in the drawer.
    ========================================================================== */
@@ -33,6 +35,13 @@
   --busy:          #6fb4ff;
   --radius:        10px;
   --zoom:          1;
+  /* The two console rails. The dial is centred between them and allowed to
+     run underneath, so these widths set how much of its crown is covered. */
+  --rail-l:        clamp(60px, 18vw, 80px);
+  --rail-r:        clamp(90px, 25vw, 110px);
+  /* Rail controls are translucent on purpose: the dial runs behind them, and
+     a solid fill would read as the rings being chopped off. */
+  --rail-fill:     rgba(5, 16, 27, 0.55);
   --tap:           40px;
   --safe-b:        env(safe-area-inset-bottom, 0px);
   --safe-t:        env(safe-area-inset-top, 0px);
@@ -85,27 +94,14 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 
 /* ===================== workspace =====================
-   One centred column: the visualiser sits in the middle of whatever space is
-   going, with every control stacked compactly beneath it. On a phone there is
-   nothing to put beside it, so nothing is set aside for one. */
+   A column of three: the console band at its natural height, the focus timer
+   when there is one, and the conversation taking everything that is left. */
 .workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-  align-items: center;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.hud-col {
-  width: 100%;
-  max-width: clamp(240px, 86%, 340px);
-  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 0;
-  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Flex items default to min-height/min-width auto, which lets a long label or
@@ -177,20 +173,44 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .icon-btn:active { background: rgba(67, 222, 210, .18); }
 
-/* ===================== status strip ===================== */
-.statusbar {
-  display: flex; gap: 4px; align-items: center; flex: 0 0 auto;
-  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+/* ===================== the console band =====================
+   Three columns — status rail, open centre, control rail — over two rows, so
+   the hologram can sit in the upper-right corner with the control rail under
+   it. The dial is laid across every cell and centred, which is what lets it
+   be wider than the gap between the rails. */
+.console {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail-l) minmax(0, 1fr) var(--rail-r);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 4px;
+  flex: 0 0 auto;
+  min-height: 0;
+  /* The dial is clamped well inside the band, but a long translation could
+     grow a rail: clip rather than let the dial spill over the conversation. */
+  overflow: hidden;
 }
-.statusbar::-webkit-scrollbar { display: none; }
 
-.chip {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 1px 6px; border-radius: 999px;
-  border: 1px solid var(--line); background: rgba(7, 20, 32, .6);
-  font-size: .48em; letter-spacing: .05em; text-transform: uppercase;
-  white-space: nowrap; color: var(--text-dim);
+/* Both rails sit above the dial and keep their own taps. */
+.rail {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
 }
+.rail-left  { grid-column: 1; grid-row: 1 / -1; align-self: center; }
+.rail-right { grid-column: 3; grid-row: 2; }
+
+/* ===================== status rail ===================== */
+.chip {
+  display: flex; align-items: center; gap: 5px;
+  min-height: 26px; padding: 2px 7px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--rail-fill);
+  font-size: .48em; letter-spacing: .06em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-dim);
+}
+.chip > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .chip .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); flex: none; }
 .chip[data-state="connected"]         { border-color: rgba(46, 230, 168, .40); color: #a9ffe0; }
 .chip[data-state="connected"] .dot    { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
@@ -199,28 +219,22 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .chip[data-state="error"] .dot        { background: var(--bad); box-shadow: 0 0 7px var(--bad); }
 .chip[data-state="disconnected"] .dot { background: #456069; }
 
-/* ===================== stage ===================== */
-/* ============ 1. avatar card: the hologram, framed ============ */
+/* ============ 1. the hologram, small, upper right ============ */
 .avatar-card {
-  position: relative;
+  position: relative; z-index: 2;
+  grid-column: 3; grid-row: 1;
   width: 100%;
-  height: clamp(124px, 23dvh, 220px);
-  flex: none;
+  height: clamp(64px, 10dvh, 92px);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background:
-    radial-gradient(70% 60% at 50% 42%, rgba(18, 74, 92, .34), transparent 72%),
-    rgba(4, 12, 22, .72);
-  box-shadow: inset 0 0 22px rgba(67, 222, 210, .12);
+    radial-gradient(70% 62% at 50% 40%, rgba(18, 74, 92, .34), transparent 72%),
+    rgba(4, 12, 22, .78);
+  box-shadow: inset 0 0 18px rgba(67, 222, 210, .14);
   overflow: hidden;
 }
-.avatar-card .card-tag {
-  position: absolute; left: 8px; top: 5px;
-  font-size: .50em; letter-spacing: .24em; text-transform: uppercase;
-  color: rgba(141, 243, 236, .55); pointer-events: none;
-}
 
-/* ============ 2. focus timer, directly under the avatar ============ */
+/* ============ focus timer, under the console ============ */
 .focus-block {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -263,18 +277,18 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-focus="paused"] .focus-dot { animation: none; background: var(--warn); box-shadow: none; }
 .app[data-focus="paused"] .focus-time { color: var(--warn); text-shadow: none; }
 
-/* ============ 3. the rings dial ============ */
+/* ============ 2. the rings dial ============ */
 .stage {
-  position: relative;
-  /* Square, and driven by height rather than width, so everything below it
-     always has room: the visualiser is a fixed instrument, not a filler.
-     max-width keeps it inside a narrow screen, shrinking it squarely. */
+  /* Across the whole console and centred in it, under both rails. Square,
+     and driven by height rather than width, so the band's height — not the
+     narrow gap between the rails — decides how big the dial is. */
+  position: relative; z-index: 1;
+  grid-column: 1 / -1; grid-row: 1 / -1;
+  place-self: center;
   aspect-ratio: 1 / 1;
-  height: clamp(150px, 25dvh, 240px);
+  height: min(100%, clamp(180px, 31dvh, 300px));
   width: auto;
   max-width: 100%;
-  margin-inline: auto;
-  flex: none;
   border-radius: var(--radius);
   background: radial-gradient(62% 58% at 50% 46%, rgba(16, 70, 86, .28), transparent 72%);
   overflow: hidden;
@@ -331,20 +345,20 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .standby-text { font-size: .72em; color: var(--text-dim); margin: 0 0 4px; }
 .standby-hint { font-size: .62em; color: #52757e; margin: 0 0 10px; }
 
-/* ===================== HUD ===================== */
-.hud { display: flex; flex-direction: column; gap: 5px; flex: 0 0 auto; min-width: 0; }
+/* ===================== 4. the control rail ===================== */
 
-/* --- RINGS / FACE, directly under the visualiser --- */
+/* --- RINGS / FACE --- */
 .mode-row {
-  display: flex; gap: 3px; align-self: stretch;
+  display: flex; gap: 3px; flex: none;
   padding: 2px; border-radius: 999px;
-  border: 1px solid var(--line); background: rgba(5, 16, 26, .8);
+  border: 1px solid var(--line); background: var(--rail-fill);
 }
 .mode-btn {
   flex: 1 1 0; min-width: 0;
-  min-height: 22px; padding: 2px 6px; border: 0; border-radius: 999px;
+  min-height: 22px; padding: 2px 4px; border: 0; border-radius: 999px;
   background: transparent; color: var(--text-dim);
-  font-size: .54em; letter-spacing: .16em; text-transform: uppercase; cursor: pointer;
+  font-size: .50em; letter-spacing: .10em; text-transform: uppercase; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mode-btn.is-active {
   color: #04161a; font-weight: 700;
@@ -352,17 +366,15 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   box-shadow: 0 0 12px rgba(67, 222, 210, .45);
 }
 
-/* --- MUTE / ACTIVE, directly underneath --- */
-.power-row { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-
+/* --- MUTE, then ACTIVE --- */
 .ctl {
-  display: flex; align-items: center; justify-content: center; gap: 5px;
-  min-height: 32px; padding: 3px 6px;
+  display: flex; align-items: center; gap: 6px; flex: none;
+  min-height: 26px; padding: 2px 8px;
   border-radius: 7px; border: 1px solid var(--line);
-  background: rgba(7, 20, 32, .8); color: var(--text);
-  font-size: .56em; letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
+  background: var(--rail-fill); color: var(--text);
+  font-size: .54em; letter-spacing: .10em; text-transform: uppercase; cursor: pointer;
 }
-.ctl-dot { width: 7px; height: 7px; border-radius: 50%; background: #43606a; flex: none; }
+.ctl-dot { width: 6px; height: 6px; border-radius: 50%; background: #43606a; flex: none; }
 .ctl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ctl-mic.is-muted { border-color: rgba(255, 93, 108, .42); color: #ffc8cd; background: rgba(38, 10, 16, .66); }
@@ -376,24 +388,24 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .ctl-power.is-standby .ctl-dot { background: #43606a; }
 
 /* --- the five functions: slim stacked rows, name left, state right --- */
-.fn-grid { display: flex; flex-direction: column; gap: 4px; }
+.fn-grid { display: flex; flex-direction: column; gap: 4px; flex: none; }
 
 .fn {
-  display: flex; flex-direction: row; align-items: center; gap: 8px;
-  min-height: 28px; padding: 2px 10px;
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
+  min-height: 26px; padding: 2px 8px;
   border: 1px solid var(--line); border-radius: 7px;
-  background: rgba(7, 20, 32, .72); color: var(--text-dim);
+  background: var(--rail-fill); color: var(--text-dim);
   cursor: pointer; overflow: hidden; text-align: left;
 }
-.fn-ico { font-size: .68em; line-height: 1; flex: none; color: rgba(141, 243, 236, .55); }
+.fn-ico { font-size: .62em; line-height: 1; flex: none; color: rgba(141, 243, 236, .55); }
 .fn-name {
   flex: 1 1 auto; min-width: 0;
-  font-size: .54em; letter-spacing: .14em; text-transform: uppercase;
+  font-size: .50em; letter-spacing: .10em; text-transform: uppercase;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .fn-state {
-  flex: none;
-  font-size: .50em; letter-spacing: .08em; text-transform: lowercase;
+  flex: 0 1 auto; min-width: 0;
+  font-size: .46em; letter-spacing: .06em; text-transform: lowercase;
   color: #4d6c74; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -409,57 +421,38 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .fn.is-unavailable .fn-state { color: var(--warn); }
 .fn:active { background: rgba(67, 222, 210, .14); }
 
-/* ===================== chat dock ===================== */
-.dock {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 3px 6px 5px;
+/* ===================== 5. the conversation =====================
+   The one element with flex-grow: whatever the console and the chat bar do
+   not take belongs to the messages. */
+.chat-panel {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 4px 6px 6px;
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--panel);
-  min-height: 0;
 }
 
-.dock-head { display: none; align-items: center; gap: 7px; }
-.dock-head h2 {
-  margin: 0; font-size: .64em; letter-spacing: .16em; text-transform: uppercase;
-  color: var(--teal-soft); font-weight: 600; flex: 1 1 auto;
-}
-.dock-head-actions { display: flex; gap: 4px; }
-
-/* The handle is the whole top edge of the dock, so it is reachable with a
-   thumb whether the dock is open or closed. */
-.dock-grip {
-  width: 100%; height: 14px; flex: none; padding: 0; margin: -2px 0 0;
-  border: 0; background: transparent; cursor: pointer;
-  display: grid; place-items: center;
-}
-.grip-bar {
-  display: block; width: 34px; height: 3px; border-radius: 3px;
-  background: rgba(141, 243, 236, .45);
-}
+.chat-head { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
+.chat-head .btn { min-height: 24px; padding: 2px 9px; font-size: .56em; }
 
 .messages {
-  display: none;
+  display: flex;
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  flex-direction: column; gap: 5px; padding-right: 2px; scrollbar-width: thin;
+  flex-direction: column; gap: 5px; padding-right: 2px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;  /* momentum, not step-by-step */
+  overscroll-behavior: contain;       /* a flick in the list is not a page pull */
 }
 .messages .empty { color: var(--text-dim); font-size: .66em; text-align: center; margin: auto; }
 
-/* The subtitle line: what JARVIS last said, shown while the dock is closed. */
-.dock-ticker {
-  font-size: .64em; line-height: 1.35; color: var(--teal-soft);
-  max-height: 2.7em; overflow: hidden;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+/* ===================== 6/7. the chat bar ===================== */
+.dock {
+  display: flex; flex-direction: column;
+  padding: 4px 6px 5px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel);
+  flex: none;
 }
-.dock-ticker:empty { display: none; }
-
-.app[data-dock="expanded"] .dock { flex: 1 1 auto; max-height: 56dvh; }
-.app[data-dock="expanded"] .dock-head { display: flex; }
-.app[data-dock="expanded"] .messages { display: flex; }
-/* History replaces the message list, so a hidden list must stay hidden even
-   though the expanded-dock rule above would otherwise show it. */
-.app[data-dock="expanded"] .messages[hidden] { display: none; }
-.app[data-dock="expanded"] .dock-ticker { display: none; }
-.app[data-dock="expanded"] .dock-grip .grip-bar { background: var(--teal); }
 
 .msg {
   max-width: 90%; padding: 6px 9px; border-radius: 9px;
@@ -504,8 +497,11 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .round-stop { border-color: rgba(255, 93, 108, .5); color: #ffc8cd; background: rgba(56, 12, 20, .7); }
 
-.history-list { display: none; overflow-y: auto; flex-direction: column; gap: 4px; min-height: 0; }
-.app[data-dock="expanded"] .history-list:not([hidden]) { display: flex; }
+.history-list {
+  display: flex; flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; flex-direction: column; gap: 4px;
+  overscroll-behavior: contain;
+}
 .history-item {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
@@ -787,14 +783,13 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 
 /* ===================== immersive mode =====================
-   Tap the visualiser and it takes the whole screen: every other row collapses
-   to nothing and the stage, which is the only element with flex-grow, expands
-   into the space. Tap again and they come back.
+   Tap the visualiser and it takes the whole screen: everything else fades out
+   and the stage is lifted out of the layout. Tap again and they come back.
 
-   The rows animate their height rather than being switched off, so the
-   transition is smooth and the canvas — watched by a ResizeObserver — keeps
-   step with it instead of jumping at the end. */
-.topbar, .statusbar, .hud, .dock, .avatar-card, .focus-block {
+   They fade rather than being switched off, so the transition is smooth and
+   the canvas — watched by a ResizeObserver — keeps step with it instead of
+   jumping at the end. */
+.topbar, .rail, .dock, .avatar-card, .focus-block, .chat-panel {
   transition: opacity .18s ease, transform .18s ease;
 }
 
@@ -805,8 +800,12 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   position: fixed;
   inset: 0;
   z-index: 20;
-  /* The stage is normally height-clamped; an explicit height would beat
-     inset:0 and leave it card-sized in the middle of a black screen. */
+  /* The stage is normally height-clamped and centred in its grid area. An
+     explicit height would beat inset:0 and leave it card-sized in the middle
+     of a black screen — and a self-alignment other than stretch makes Chromium
+     shrink-to-fit the fixed box instead, which with absolutely positioned
+     children means no box at all. */
+  place-self: stretch;
   width: auto;
   height: auto;
   max-height: none;
@@ -818,10 +817,10 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .app[data-immersive="on"] > .topbar,
 .app[data-immersive="on"] > .dock,
-.app[data-immersive="on"] .statusbar,
+.app[data-immersive="on"] .rail,
 .app[data-immersive="on"] .avatar-card,
 .app[data-immersive="on"] .focus-block,
-.app[data-immersive="on"] .hud {
+.app[data-immersive="on"] .chat-panel {
   opacity: 0;
   transform: translateY(6px);
   pointer-events: none;
@@ -863,37 +862,44 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 /* ===================== responsive ===================== */
 
-/* Short phones: tighten the column so the whole stack still clears the dock. */
+/* Short phones: tighten the console so the conversation keeps its share. */
 @media (max-height: 700px) {
   .app { gap: 4px; font-size: calc(14px * var(--zoom)); }
-  .avatar-card { height: clamp(96px, 15dvh, 130px); }
-  .stage { height: clamp(120px, 21dvh, 180px); }
-  .fn { min-height: 24px; }
-  .ctl { min-height: 28px; }
-  .app[data-dock="expanded"] .dock { max-height: 50dvh; }
+  .avatar-card { height: clamp(54px, 9dvh, 74px); }
+  .stage { height: min(100%, clamp(150px, 28dvh, 230px)); }
+  .fn, .ctl, .chip { min-height: 23px; }
 }
 
-/* Narrow phones: the five function labels still have to fit. */
-@media (max-width: 370px) {
-  .hud-col { max-width: 94%; }
-  .fn-name { letter-spacing: .08em; }
-}
-
-/* Landscape: height is the scarce axis, so the visualiser gives way first. */
-@media (orientation: landscape) and (max-height: 560px) {
-  /* Height is the scarce axis here, so the two visualisers give way first
-     and the card goes entirely — the dial carries the state on its own. */
+/* Typing, or any genuinely short viewport: the hologram gives its corner back
+   so the conversation keeps a usable height while the keyboard is up.
+   Two triggers because there are two kinds of Android: `resizes-content`
+   shrinks the viewport itself (the media query catches it), while an older
+   Chrome leaves it alone and only --kb/data-kb say the keyboard is there. */
+@media (max-height: 560px) {
   .avatar-card { display: none; }
-  .stage { height: clamp(100px, 26dvh, 160px); }
-  .hud-col { max-width: clamp(240px, 54%, 330px); }
-  .app[data-dock="expanded"] .dock { max-height: 62dvh; }
+  .rail-right { grid-row: 1 / -1; }
+}
+.app[data-kb="on"] .avatar-card { display: none; }
+.app[data-kb="on"] .rail-right { grid-row: 1 / -1; }
+
+/* Narrow phones: the rail labels still have to fit. */
+@media (max-width: 370px) {
+  .fn-name, .ctl-label { letter-spacing: .06em; }
+  .chip { letter-spacing: .03em; }
 }
 
-/* Tablet / desktop PWA window: centre it, keep the column phone-sized. */
+/* Landscape: height is the scarce axis, so the hologram goes first and the
+   console gives its height back to the conversation. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .avatar-card { display: none; }
+  .rail-right { grid-row: 1 / -1; }
+  .stage { height: min(100%, clamp(100px, 26dvh, 170px)); }
+}
+
+/* Tablet / desktop PWA window: centre it, widen the rails a little. */
 @media (min-width: 760px) {
   .app { max-width: 980px; margin: 0 auto; padding-inline: 16px; }
-  .hud-col { max-width: 380px; }
-  .avatar-card { height: clamp(150px, 22dvh, 230px); }
-  .stage { height: clamp(180px, 28dvh, 300px); }
-  .dock { max-width: 680px; margin: 0 auto; width: 100%; }
+  :root { --rail-l: 120px; --rail-r: 160px; }
+  .avatar-card { height: clamp(96px, 14dvh, 150px); }
+  .stage { height: min(100%, clamp(220px, 34dvh, 380px)); }
 }
