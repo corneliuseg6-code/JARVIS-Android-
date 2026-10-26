@@ -305,3 +305,17 @@ informative. The 0.10 ms figure is that difference.
 | Cost | 0.10 ms/frame against the same scene with the layer stopped, unchanged from 900 motes |
 | Border colour | red at idle, green for listening / thinking / speaking, red again in standby even with an activity still set |
 | Border animation | `animation-name: edge-run` still running in every state |
+
+## Shared RINGS/FACE background — verified
+
+| What | How it was verified |
+|---|---|
+| Same background | with the visualiser hidden, a pure-background region of the stage is byte-identical in both modes (diff bbox `None`, max channel delta 0) |
+| Stage styling | identical computed `background-image` in both modes |
+| Mode switch | RINGS shows the 2D canvas with the GL one hidden, FACE the reverse |
+| The face still renders | bust, irises, scan band and mesh overlay all present after the wash was removed |
+
+The first comparison attempt failed on a region that included the stage's
+top-right corner, where the hologram card and the control rail overlap it —
+those differ between frames because they animate, not because the background
+does. The region was narrowed to one only the background occupies.

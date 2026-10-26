@@ -2,6 +2,36 @@
 
 ---
 
+# V3.3 — one background for both visualisers
+
+FACE used to paint its own background: a full-canvas volumetric wash behind
+the bust, plus its own field of motes drifting through the head's volume.
+RINGS painted neither — it cleared its canvas and drew the dial, letting the
+stage's own gradient and the ambient particle field show through. Switching
+mode therefore changed the backdrop as well as the visualiser.
+
+Both are now gone from `face3d.js`:
+
+* the `WASH` program, its shaders, its buffer and the `_wash()` pass;
+* the GL particle buffers and their draw call.
+
+The irises stay — they are part of the face, not of the background — and so
+does everything else: the scan band, the interference, the depth tint, the
+mesh overlay, the jaw and the lids.
+
+What remains behind the visualiser is identical in both modes: the page
+gradient, the ambient particle field, and the stage's own radial. Switching
+RINGS ↔ FACE now swaps one canvas for the other and changes nothing else.
+
+**Verified by pixel comparison.** With the visualiser canvas hidden, a region
+strictly inside the stage and clear of the mode label, the hologram card and
+the control rail is **byte-identical** between the two modes — diff bounding
+box `None`, maximum channel delta `0`.
+
+The file is ~1.7KB smaller and FACE is two draw calls lighter per frame.
+
+---
+
 # V3.2 — depth in the particle field, status in the border
 
 ## Thousands of motes, with depth
