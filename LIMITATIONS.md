@@ -47,26 +47,34 @@ the result was observed.
 | Generated `tokens.txt` | Piper models from Hugging Face ship no `tokens.txt`; the one generated from `phoneme_id_map` is **identical** to the official file (130 lines, 0 mismatches) |
 | Legacy voice names | a model named `en_US-alan-medium` that is not in the catalog is still found and used |
 
-### Frontend (Chromium, 412×915 phone viewport, fake mic/camera devices)
+### Frontend (Chromium, mobile user agent, fake mic/camera devices)
 
-39 of 39 automated checks pass, among them:
+Checked at **412×915** and **360×800** against the running backend:
 
-* loads with zero JavaScript errors, zero missing translation keys
+* loads with zero JavaScript errors, zero missing translation keys (177 keys in
+  each of the six languages)
 * RINGS renders; FACE renders; no cube button; legacy `cube` falls back to rings
-* all six languages translate menus, buttons, placeholders, status, mic/power
-  labels; the choice reaches the backend
-* magnifier: below the menu, on the left, horizontal (227×34), compact, no
-  overlap with the stage or the activity pill, and it really scales the UI
+* **nothing off screen** in either size — every visible control's rectangle is
+  inside the viewport — and the settings sheet does not scroll sideways
+  (`scrollWidth == clientWidth`)
+* the visualiser is the element that grows: 392×645 of a 412×915 screen,
+  344×530 of a 360×800 one
+* all six languages translate the drawer, the function switches, buttons,
+  placeholders, status and the mic/power labels; the choice reaches the backend
 * microphone muted at startup; MIC ON opens a live track; MUTE ends the track
   (`readyState: "ended"`), clears recognition and the restart flag; still muted
   after a reload; cannot be enabled in standby
-* standby pauses the animation loop and shows the veil; resume restarts it and
-  does **not** reopen the microphone
-* all four views switch; the armory card shows CONNECTED with its tools and no
-  credential value; chat streams an answer into the bubble
+* standby pauses the animation loop, shows the veil and switches all five
+  function switches off; resume restarts the animation and does **not** reopen
+  the microphone
+* the drawer opens and closes; every panel opens in the sheet; the armory card
+  shows CONNECTED with its tools and no credential value; chat streams an
+  answer into the bubble; the dock expands and collapses
 * camera starts, indicator appears, stopping ends the video track
-* landscape 915×412 and small phone 360×640: no horizontal overflow, controls
-  on screen
+* HOLO moves the projection on a drag and on a `deviceorientation` event;
+  FOCUS counts down and renders the drift tally; REFLEX opens the microphone
+  and its gate returns `null` for "hello there" and `"what time is it"` for
+  "Jarvis, what time is it"
 
 ---
 
@@ -118,6 +126,21 @@ the result was observed.
 
 ---
 
+## The five function switches — what each one can actually do
+
+| Switch | On Android | Why |
+|---|---|---|
+| **EYES** | Works | `getUserMedia` on a secure origin; `127.0.0.1` counts as one. |
+| **WATCH** | **Does not work** | Android browsers do not implement `getDisplayMedia`. The switch detects this, dims itself, says so in its own label and refuses to turn on. It works in the desktop/PWA build, where it also feeds a still to the local vision model. |
+| **HOLO** | Works | Pointer drag always; `deviceorientation` additionally where the phone exposes the sensor. It turns the visualiser — it is not hand tracking, and nothing here claims it is. |
+| **FOCUS** | Works, within one real limit | A web page can only see that **JARVIS itself** lost focus (`visibilitychange`). It cannot see which other app you switched to, and it cannot watch a browser tab in a different app. So "drift" means "you left JARVIS for more than two seconds", and that is exactly what the message says. |
+| **REFLEX** | Works where speech recognition works | It gates transcripts on the wake word. The transcripts come from the browser's own speech recognition, which on most Android devices needs Google speech services and a network connection (see point 1 above). With no recognition available, REFLEX turns on, the microphone opens and the level meter moves, but no transcript arrives — and the interface says so rather than looking broken. |
+
+Standby, hiding the page and EXIT switch all five off and release every device
+they hold.
+
+---
+
 ## Known limitations by design
 
 * Chat does not yet call MCP tools automatically. The Armory connects, lists
@@ -125,7 +148,10 @@ the result was observed.
   that is the obvious next step, and pretending otherwise would be the kind of
   claim this project is trying to avoid.
 * The magnifier scales the interface (fonts, controls, panels). It does not
-  magnify the avatar canvas, which always fills its stage.
+  magnify the visualiser canvas, which always fills its stage.
+* The FACE head is an original parametric model, not a scan or a likeness of
+  anyone. It is built from a measured cross-section profile and a handful of
+  smooth deformations, so it is adjustable but it is not photoreal.
 * Speech recognition uses the browser engine. There is no offline STT; on a
   device without Google speech services, MIC ON records and animates but
   produces no transcript — the interface says so rather than looking broken.

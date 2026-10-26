@@ -25,6 +25,8 @@ export default class Avatar {
     this.activity = 'idle';
     this.level = 0;
     this.motion = 1;          // 0 = reduced motion
+    this.tiltX = 0;           // HOLO: horizontal parallax, -1.1 .. 1.1
+    this.tiltY = 0;           // HOLO: vertical parallax, -0.6 .. 0.6
     this.running = false;
     this.paused = false;
     this._raf = 0;
@@ -72,6 +74,19 @@ export default class Avatar {
 
   setReducedMotion(reduced) {
     this.motion = reduced ? 0.25 : 1;
+  }
+
+  /** The text in the middle of the rings, from settings. */
+  setLabel(text) {
+    for (const renderer of Object.values(this.renderers)) renderer.setLabel?.(text);
+    if (!this.running || this.paused) this._drawOnce();
+  }
+
+  /** HOLO: turn the projection with a drag or with the phone's own tilt. */
+  setTilt(x, y) {
+    this.tiltX = Number.isFinite(x) ? x : 0;
+    this.tiltY = Number.isFinite(y) ? y : 0;
+    if (!this.running || this.paused) this._drawOnce();
   }
 
   resize() {
@@ -153,6 +168,8 @@ export default class Avatar {
         activity: this.activity,
         level: this.level,
         motion: this.motion,
+        tiltX: this.tiltX,
+        tiltY: this.tiltY,
       });
     } catch (err) {
       console.error('[avatar] render failed', err);

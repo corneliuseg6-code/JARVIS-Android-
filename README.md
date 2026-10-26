@@ -13,17 +13,57 @@ frontend.
 
 ---
 
+## The interface
+
+The whole screen is one column, and only the visualiser grows:
+
+```
+┌──────────────────────────────────────┐
+│ ☰  JARVIS            ● IDLE      ⚙  │  top bar
+│ ●SERVER ●OLLAMA ●VOICE ●TOOLS ●VISION│  status strip (scrolls sideways)
+│                                      │
+│                                      │
+│            ╭──────────╮              │
+│            │  RINGS   │              │  THE VISUALISER
+│            │    or    │              │  (the only element that grows)
+│            │   FACE   │              │
+│            ╰──────────╯              │
+│                                      │
+│             ( RINGS | FACE )         │  mode, directly underneath
+│     ┌───────────┬──────────────┐     │
+│     │   MUTE    │    ACTIVE    │     │  mic + power
+│     └───────────┴──────────────┘     │
+│  ┌────┬─────┬─────┬──────┬────────┐  │
+│  │EYES│WATCH│HOLO │FOCUS │ REFLEX │  │  the five functions
+│  └────┴─────┴─────┴──────┴────────┘  │
+│  ┌────────────────────────────────┐  │
+│  │ ───                            │  │  chat bar — drag the handle
+│  │ Write to JARVIS…         ➤     │  │  to expand the conversation
+│  └────────────────────────────────┘  │
+└──────────────────────────────────────┘
+```
+
+The navigation is a **collapsible drawer** (☰) and the panels — Tool Armory,
+Eyes, Settings — are a **bottom sheet**. Neither sits in the column, so neither
+can take space from the visualiser or push a control off the screen.
+
+---
+
 ## What it does
 
 | Area | Status |
 |---|---|
-| **Two avatars** | RINGS (two glowing 3D rings) and FACE (holographic wireframe). The CUBE mode is gone. |
+| **Two visualisers** | RINGS (a layered instrument dial: tick crowns, segmented arcs, orbiting satellites, two real 3D gyro rings, reactive core) and FACE (a sculpted holographic head with rim-lit wireframe, blinking eyes and a jaw that moves with speech). There is no cube. |
+| **EYES** | Camera with front/rear switch, a visible indicator, local vision through Ollama. |
+| **WATCH** | Screen capture through `getDisplayMedia`. **Android browsers have no such API** — the switch says so and stays off rather than pretending. |
+| **HOLO** | Drag the projection, or tilt the phone, and the visualiser turns with it. |
+| **FOCUS** | A timed session. Leaving JARVIS counts as a drift; JARVIS tells you when you come back, and reports the tally at the end. |
+| **REFLEX** | Hands-free. The microphone stays open and only an utterance containing the wake word is acted on. |
 | **Six languages** | RO · EN · FR · DE · ES · IT, switched instantly, saved between sessions. |
 | **Microphone** | Explicit ON / MUTE. **Muted at every start**, never re-enabled on its own. |
-| **Active / Standby** | Standby stops mic, speech, camera and animation; the server and your data keep running. |
-| **Magnifier** | Compact horizontal wedge under the main menu, left side. |
+| **Active / Standby** | Standby stops mic, speech, camera, every function switch and the animation; the server and your data keep running. |
+| **Magnifier** | In the drawer: a compact horizontal wedge that scales the whole interface. |
 | **Tool Armory** | MCP connections over stdio or HTTP, with credentials kept on the backend. |
-| **EYES** | Camera with front/rear switch, visible indicator, local vision through Ollama. |
 | **Chat** | Streaming answers from Ollama, conversations saved on disk. |
 | **Voice** | Offline Piper voices via sherpa-onnx, with a browser-voice fallback. |
 
@@ -42,7 +82,7 @@ web/         Frontend (plain ES modules, no bundler)
   index.html  css/jarvis.css  sw.js  manifest.webmanifest
   js/avatar/   rings.js  face.js  index.js
   js/i18n/     ro en fr de es it + index.js
-  js/ui/       mic power magnifier chat armory eyes settings status voice toast
+  js/ui/       mic power modes magnifier chat armory eyes settings status voice toast
   js/core/     api.js  state.js  bus.js
 tools/       selftest.py  mock_mcp_server.py  mock_ollama.py
 ```
@@ -86,8 +126,12 @@ it until you pass `--lan`.
 * The microphone is muted at startup, on standby, when the page is hidden and
   on exit — and every audio track is stopped, not just ignored.
 * Resuming from standby never re-opens the microphone.
+* REFLEX only ever opens the microphone on your tap, and closes it again when
+  you switch REFLEX off.
 * The camera stops on disable, on standby, when the page is hidden, and when
   you leave the EYES view.
+* Screen capture stops when the page is hidden, when you stop it from the
+  browser's own bar, and on standby.
 * Camera frames are never written to storage unless you turn that on.
 * Credentials live in `~/.jarvis/secrets.json` (chmod 600). The browser can
   set a value and is told whether one exists — it never receives the value.

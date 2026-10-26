@@ -22,6 +22,10 @@ DEFAULTS: dict[str, Any] = {
     "theme_accent": "cyan",
     "reduced_motion": False,
     "magnifier_enabled": True,
+    "hud_label": "J.A.R.V.I.S.",     # the text in the middle of the rings
+    # --- assistant behaviour ---------------------------------------------
+    "wake_word": "Jarvis",           # REFLEX acts only on a phrase containing it
+    "focus_minutes": 30,             # length of a FOCUS session
     # --- privacy ---------------------------------------------------------
     # The microphone is ALWAYS muted on start. This value is deliberately not
     # persisted as "on": see get_config(), which forces it back to True.
@@ -80,8 +84,22 @@ def get_config(*, refresh: bool = False) -> dict[str, Any]:
                 cfg["conversation_language"] = cfg["ui_language"]
             if cfg.get("avatar_mode") not in ("rings", "face"):
                 cfg["avatar_mode"] = "rings"
+            _clamp_v21(cfg)
             _CACHE = cfg
         return dict(_CACHE)
+
+
+def _clamp_v21(cfg: dict[str, Any]) -> None:
+    """Keep the V2.1 interface keys inside what the frontend can render."""
+    label = str(cfg.get("hud_label") or "").strip()
+    cfg["hud_label"] = label[:16] or DEFAULTS["hud_label"]
+    wake = str(cfg.get("wake_word") or "").strip()
+    cfg["wake_word"] = wake[:24] or DEFAULTS["wake_word"]
+    try:
+        minutes = int(cfg.get("focus_minutes") or DEFAULTS["focus_minutes"])
+    except (TypeError, ValueError):
+        minutes = DEFAULTS["focus_minutes"]
+    cfg["focus_minutes"] = max(1, min(240, minutes))
 
 
 def update_config(patch: dict[str, Any]) -> dict[str, Any]:
@@ -106,6 +124,7 @@ def update_config(patch: dict[str, Any]) -> dict[str, Any]:
             cfg["avatar_mode"] = "rings"
         if cfg.get("conversation_follows_ui"):
             cfg["conversation_language"] = cfg["ui_language"]
+        _clamp_v21(cfg)
         # Not persisted as enabled — the mic is muted at every start.
         persisted = dict(cfg)
         persisted["mic_muted"] = True

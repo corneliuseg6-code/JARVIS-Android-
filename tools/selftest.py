@@ -67,9 +67,25 @@ def check_frontend():
         "js/avatar/index.js", "js/avatar/rings.js", "js/avatar/face.js",
         "js/i18n/index.js", "js/ui/mic.js", "js/ui/power.js", "js/ui/magnifier.js",
         "js/ui/armory.js", "js/ui/eyes.js", "js/ui/settings.js", "js/ui/chat.js",
+        "js/ui/modes.js",
     ]
     for rel in required:
         (ok if (web / rel).is_file() else bad)(f"web/{rel}")
+
+    section("Interface elements")
+    html = (web / "index.html").read_text(encoding="utf-8")
+    for element, label in (
+        ('id="avatar-canvas"', "visualiser canvas"),
+        ('id="avatar-switch"', "RINGS / FACE control"),
+        ('id="btn-mic"', "MUTE control"),
+        ('id="btn-power"', "ACTIVE / STANDBY control"),
+        ('id="drawer"', "collapsible navigation drawer"),
+        ('id="dock"', "bottom chat bar"),
+        ('id="sheet"', "panel sheet"),
+    ):
+        (ok if element in html else bad)(label)
+    for name in ("eyes", "watch", "holo", "focus", "reflex"):
+        (ok if f'id="fn-{name}"' in html else bad)(f"{name.upper()} switch")
 
     section("Translations")
     reference = None
@@ -161,6 +177,11 @@ def check_server(base):
         (ok if not cfg.get("save_captures") else warn)("camera captures are not saved")
         (ok if cfg.get("avatar_mode") in ("rings", "face") else bad)(
             f"avatar mode is rings or face ({cfg.get('avatar_mode')})")
+        (ok if (cfg.get("wake_word") or "").strip() else bad)(
+            f"wake word is set ({cfg.get('wake_word')})")
+        minutes = cfg.get("focus_minutes")
+        (ok if isinstance(minutes, int) and 1 <= minutes <= 240 else bad)(
+            f"focus session length is sane ({minutes})")
     except Exception as exc:  # noqa: BLE001
         bad("config endpoint", repr(exc))
 

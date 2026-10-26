@@ -55,6 +55,7 @@ export default class Settings {
     this.host.innerHTML = '';
     this.host.append(
       this._interfaceGroup(cfg),
+      this._assistantGroup(cfg),
       this._voiceGroup(cfg),
       this._modelsGroup(cfg),
       this._diagnosticsGroup(),
@@ -97,6 +98,38 @@ export default class Settings {
       this._save({ reduced_motion: checked })));
     group.appendChild(this._switch(t('settings.magnifier'), cfg.magnifier_enabled !== false, (checked) =>
       this._save({ magnifier_enabled: checked })));
+    return group;
+  }
+
+  /** What REFLEX listens for, how long FOCUS runs, what the rings say. */
+  _assistantGroup(cfg) {
+    const group = this._group(t('settings.assistant'));
+
+    const wake = document.createElement('input');
+    wake.type = 'text';
+    wake.value = cfg.wake_word || 'Jarvis';
+    wake.addEventListener('change', () => this._save({ wake_word: wake.value.trim() }));
+    const wakeField = this._field(t('settings.wakeWord'), wake);
+    const hint = document.createElement('span');
+    hint.className = 'hint';
+    hint.textContent = t('settings.wakeWordHint');
+    wakeField.appendChild(hint);
+    group.appendChild(wakeField);
+
+    const minutes = document.createElement('input');
+    minutes.type = 'number';
+    minutes.min = '1';
+    minutes.max = '240';
+    minutes.value = String(cfg.focus_minutes || 30);
+    minutes.addEventListener('change', () => this._save({ focus_minutes: Number(minutes.value) }));
+    group.appendChild(this._field(t('settings.focusMinutes'), minutes));
+
+    const label = document.createElement('input');
+    label.type = 'text';
+    label.maxLength = 16;
+    label.value = cfg.hud_label || 'J.A.R.V.I.S.';
+    label.addEventListener('change', () => this._save({ hud_label: label.value.trim() }));
+    group.appendChild(this._field(t('settings.hudLabel'), label));
     return group;
   }
 

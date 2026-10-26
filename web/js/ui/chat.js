@@ -5,9 +5,11 @@ import { t } from '../i18n/index.js';
 import { toast } from './toast.js';
 
 export default class Chat {
-  constructor({ voice, onActivity }) {
+  constructor({ voice, onActivity, onSend, onReply }) {
     this.voice = voice;
     this.onActivity = onActivity;
+    this.onSend = onSend;      // the dock opens itself when a message goes out
+    this.onReply = onReply;    // the collapsed dock shows the last answer
     this.messages = document.getElementById('messages');
     this.form = document.getElementById('composer');
     this.input = document.getElementById('chat-input');
@@ -141,6 +143,7 @@ export default class Chat {
 
     const cfg = state.get('config') || {};
     const language = cfg.conversation_language || 'ro';
+    this.onSend?.(text);
     this.input.value = '';
     this._autosize();
     this.addMessage('user', text);
@@ -174,6 +177,7 @@ export default class Chat {
         onDone: (data) => {
           const finalText = (data.text || answer).trim();
           body.textContent = finalText;
+          this.onReply?.(finalText);
           if (finalText) this._addReplay(bubble, finalText, language);
           this.voice?.speak(finalText, language);
         },

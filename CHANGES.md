@@ -1,5 +1,126 @@
 # JARVIS Android V2 — what this version contains
 
+---
+
+# V2.1 — the interface redesign
+
+Built against the reference recording and its transcript, which were analysed
+frame by frame in this session. The backend, the Termux launcher, the Ollama
+integration, the six languages, the voice system, the camera, the MCP Tool
+Armory and the microphone privacy rules are all unchanged and still working —
+this release rebuilds the interface on top of them.
+
+## The visualiser
+
+**RINGS** was two tilted circles. It is now a layered instrument dial, drawn in
+eight passes that each move at their own speed and direction:
+
+1. an outer crown of 120 radial graduations, every fifth one long
+2. four bright arc segments with gaps, turning slowly against the crown
+3. a denser graduation ring running the other way
+4. a thin orbit ring carrying six satellites
+5. a sweep arc with a gradient tail that accelerates while JARVIS is thinking
+6. an inner dashed ring
+7. two real 3D circles, depth-sorted, for volume
+8. a reactive core with the centre label, a breathing outline, and — while
+   listening or speaking — a closed radial waveform built from the live
+   microphone level
+
+The label in the middle is a setting (`hud_label`), so it is yours to change.
+
+**FACE** was a wireframe on a hemisphere, which is why it read as a mask. It is
+now a real sculpted surface:
+
+* the head is a stack of twelve measured cross-sections (half-width, half-depth
+  and a z-centre at each height) interpolated with a Catmull-Rom spline, so it
+  has a cranium, cheekbones, a jaw angle and a chin instead of an egg outline
+* smooth deformations add the brow ridge, eye sockets, nose bridge and base,
+  philtrum, lips, cheekbones and chin, all faded out towards the ears
+* features sit at the usual proportions: eye line at mid height, base of the
+  nose two thirds down the face, mouth between that and the chin
+* every vertex carries a normal, and shading is **rim-weighted** — the segments
+  turning away from you are the bright ones, which is what gives a wireframe
+  the back-lit, glassy look instead of a flat net
+* the outline is taken from the mesh itself, at the points where the normals
+  stop facing the camera, so it stays correct as the head turns
+* blinking, a lid crease, an iris that drifts while thinking and widens while
+  listening, an easing jaw that opens with speech, and a scan sweep
+
+Both renderers stay Canvas 2D and batch their geometry: the mesh is built once
+with its normals, and the thousands of segments are stroked as four
+brightness-bucketed paths per frame rather than one path each.
+
+## Layout
+
+* The navigation is a **collapsible drawer** behind ☰, with the magnifier, the
+  language picker and EXIT inside it.
+* The **visualiser is the central focus** and the only element that grows.
+* **RINGS / FACE** sits directly below it, as a compact segmented control.
+* **MUTE** and **ACTIVE / STANDBY** sit directly underneath that.
+* **EYES · WATCH · HOLO · FOCUS · REFLEX** form one compact five-across group.
+* The oversized chat panel is now a **small bottom bar**: a rounded input, a
+  round send button, and the last thing JARVIS said shown as a subtitle. Drag
+  the handle (or tap the input) and it expands into the full conversation.
+* Tool Armory, Eyes and Settings became a **bottom sheet** instead of rows in
+  the column — which is what used to squeeze everything else.
+* Borders, padding and button sizes were cut throughout; the whole interface
+  fits a 360×800 phone with nothing off screen and nothing to scroll.
+
+## The five functions
+
+| Switch | What it really does |
+|---|---|
+| **EYES** | Opens the Eyes panel and starts the camera. Real. |
+| **WATCH** | `getDisplayMedia`. **Android browsers do not implement it**, so on a phone the switch is dimmed and says so; it works in the desktop/PWA build, where it also feeds the local vision model. |
+| **HOLO** | Drag the stage, or tilt the phone, and the projection turns. Device orientation is eased and ignores the null readings a sensorless device reports. Real. |
+| **FOCUS** | A session of `focus_minutes`. Leaving JARVIS for more than two seconds counts as a drift; JARVIS says so when you come back and gives the tally at the end. It can only see you leave *JARVIS* — a web page cannot watch other Android apps, and this does not claim to. |
+| **REFLEX** | Opens the microphone and gates every transcript on the wake word, so "Jarvis, what time is it" reaches the model as "what time is it" and anything without the wake word is ignored. Real. |
+
+Each switch reports its own state in its label. Standby, hiding the page and
+EXIT all switch every one of them off.
+
+## Backend
+
+Three settings were added and are validated and clamped on load and on save:
+`wake_word` (default `Jarvis`), `focus_minutes` (1–240, default 30) and
+`hud_label` (default `J.A.R.V.I.S.`). Everything else is untouched.
+
+## Bugs found and fixed while testing this release
+
+1. **A malformed `\u` escape** in the Romanian translation stopped the whole
+   module graph from parsing — the interface loaded blank. Found by the
+   Chromium console check, not by reading.
+2. **`[hidden]` did nothing** on any component whose CSS sets `display`: the
+   Stop button sat next to Send permanently, and the camera indicator would
+   have done the same. One global `[hidden] { display: none !important }`
+   removes the entire class of bug.
+3. **The dock handle was unreachable when the dock was closed**, because it
+   lived inside the header that only appears when it is open. It is now the
+   full top edge of the bar.
+4. **Settings overflowed a 360px screen sideways**: `<select>` and
+   `<input type=number>` outside a `.field` wrapper fell back to the platform's
+   light theme at their natural width. Controls are now styled by element
+   inside the sheet, and the voice rows wrap.
+
+## Verified in this session
+
+Chromium at 412×915 and 360×800 with a mobile user agent, against the real
+backend:
+
+* zero JavaScript errors, zero missing translation keys (177 in each of the six
+  languages)
+* no element off screen in either size; the sheet does not scroll sideways
+* the visualiser takes 645px of 915 and 530px of 800
+* HOLO turns the projection on drag and on device orientation; FOCUS counts
+  down and reports drift; REFLEX opens the mic and its wake-word gate accepts
+  "Jarvis, …" and rejects everything else; STANDBY switches all five off and
+  mutes the microphone
+* `tools/selftest.py`: 56 passed, 0 failed
+
+---
+
+# V2.0
+
 ## Important context
 
 The repository `corneliuseg6-code/JARVIS-Android-` was **empty** when this

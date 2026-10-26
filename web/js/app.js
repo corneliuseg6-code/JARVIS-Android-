@@ -5,12 +5,16 @@
  * rest of the interface still comes up and the failure is reported, instead of
  * the whole page dying at the first error (the classic "buttons do nothing"
  * symptom).
+ *
+ * The shell is: top bar, status strip, visualiser, HUD, chat dock — with the
+ * navigation as a drawer and the panels as a sheet, so neither can steal
+ * vertical space from the visualiser.
  */
 import { api } from './core/api.js';
 import * as state from './core/state.js';
 import { on } from './core/bus.js';
 import {
-  LANGUAGES, applyTranslations, getLanguage, isSupported, setLanguage, t, missingKeys,
+  LANGUAGES, applyTranslations, isSupported, setLanguage, t, missingKeys,
 } from './i18n/index.js';
 import Avatar from './avatar/index.js';
 import Mic from './ui/mic.js';
@@ -21,15 +25,17 @@ import Status from './ui/status.js';
 import Chat from './ui/chat.js';
 import Armory from './ui/armory.js';
 import Eyes from './ui/eyes.js';
+import Modes from './ui/modes.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
 
 const app = {
   avatar: null, mic: null, voice: null, power: null, magnifier: null,
-  status: null, chat: null, armory: null, eyes: null, settings: null,
+  status: null, chat: null, armory: null, eyes: null, modes: null, settings: null,
 };
 
 const root = document.getElementById('app');
+const SHEET_VIEWS = ['armory', 'eyes', 'settings'];
 
 function guard(name, fn) {
   try {
@@ -55,22 +61,66 @@ function setActivity(activity) {
   }
 }
 
-// ---------------------------------------------------------------- views
+// ---------------------------------------------------------------- shell
+function setNav(open) {
+  root?.setAttribute('data-nav', open ? 'open' : 'closed');
+  const drawer = document.getElementById('drawer');
+  const scrim = document.getElementById('scrim');
+  const toggle = document.getElementById('btn-nav');
+  if (drawer) drawer.setAttribute('aria-hidden', String(!open));
+  if (toggle) toggle.setAttribute('aria-expanded', String(open));
+  // The scrim covers the drawer and the sheet alike.
+  if (scrim) scrim.hidden = !open && !SHEET_VIEWS.includes(state.get('view'));
+}
+
+function setDock(expanded) {
+  root?.setAttribute('data-dock', expanded ? 'expanded' : 'collapsed');
+  document.getElementById('btn-dock')?.setAttribute('aria-expanded', String(expanded));
+  state.set({ dockOpen: expanded });
+  requestAnimationFrame(() => app.avatar?.resize());
+}
+
+/** 'home' shows the visualiser alone; the rest open the bottom sheet. */
 function setView(view) {
+  if (!SHEET_VIEWS.includes(view)) view = 'home';
   state.set({ view });
   root?.setAttribute('data-view', view);
+
   document.querySelectorAll('.menu-btn').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.view === view);
   });
+
+  const sheet = document.getElementById('sheet');
+  const title = document.getElementById('sheet-title');
+  const scrim = document.getElementById('scrim');
+  const isSheet = SHEET_VIEWS.includes(view);
+  if (sheet) sheet.hidden = !isSheet;
+  if (scrim) scrim.hidden = !isSheet && root?.getAttribute('data-nav') !== 'open';
   document.querySelectorAll('.panel').forEach((panel) => {
     panel.hidden = panel.dataset.panel !== view;
   });
-  if (view !== 'eyes') app.eyes?.stop('view-change');
+  if (title && isSheet) {
+    title.textContent = t('nav.' + view);
+    title.removeAttribute('data-i18n');
+  }
+
+  // Leaving the Eyes panel releases the camera, and with it the EYES switch.
+  if (view !== 'eyes' && app.eyes?.isOn()) {
+    app.eyes.stop('view-change');
+    app.modes?.set('eyes', false, 'view-change');
+  }
   if (view === 'armory') app.armory?.refresh();
   if (view === 'settings') app.settings?.refresh();
-  if (view === 'chat') app.chat?.focus();
-  // The avatar canvas changes size when a panel opens or closes.
+
   requestAnimationFrame(() => app.avatar?.resize());
+}
+
+function setNote(text, warn) {
+  const note = document.getElementById('stage-note');
+  if (!note) return;
+  note.textContent = text || '';
+  note.hidden = !text;
+  note.classList.toggle('is-warn', !!warn);
 }
 
 // ---------------------------------------------------------------- language
@@ -84,10 +134,12 @@ function applyLanguage(code, { persist = false } = {}) {
   app.mic?.render();
   app.power?.render();
   app.armory?.render();
+  app.modes?.render();
   app.settings?.render();
   app.voice?.resetWarnings();
   app.mic?.refreshLanguage();
   setActivity(state.get('activity'));
+  if (SHEET_VIEWS.includes(state.get('view'))) setView(state.get('view'));
   state.saveLocal({ ui_language: code });
   if (persist) {
     const cfg = state.get('config') || {};
@@ -106,7 +158,7 @@ function buildLanguagePicker() {
   for (const lang of LANGUAGES) {
     const option = document.createElement('option');
     option.value = lang.code;
-    option.textContent = lang.short;
+    option.textContent = `${lang.short} — ${lang.label}`;
     option.title = lang.label;
     select.appendChild(option);
   }
@@ -116,9 +168,11 @@ function buildLanguagePicker() {
 // ---------------------------------------------------------------- avatar
 function applyAvatarMode(mode, { persist = false } = {}) {
   const applied = app.avatar?.setMode(mode) || 'rings';
-  document.querySelectorAll('.av-btn').forEach((button) => {
+  document.querySelectorAll('.mode-btn').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.mode === applied);
   });
+  const tag = document.getElementById('stage-tag');
+  if (tag) tag.textContent = applied.toUpperCase();
   state.set({ avatarMode: applied });
   state.saveLocal({ avatarMode: applied });
   if (persist) {
@@ -156,11 +210,16 @@ async function boot() {
   app.avatar?.start();
   applyAvatarMode((config && config.avatar_mode) || local.avatarMode || 'rings');
   applyMotion(!!(config && config.reduced_motion));
+  app.avatar?.setLabel((config && config.hud_label) || 'J.A.R.V.I.S.');
 
   // 3. voice + microphone (muted) + power
   app.voice = guard('voice', () => new Voice({ onActivity: setActivity }));
   app.mic = guard('mic', () => new Mic({
-    onTranscript: (text) => app.chat?.send(text),
+    // REFLEX, when it is on, decides whether an utterance was meant for JARVIS.
+    onTranscript: (text) => {
+      const wanted = app.modes ? app.modes.filterTranscript(text) : text;
+      if (wanted) app.chat?.send(wanted);
+    },
     onLevel: (level) => app.avatar?.setLevel(level),
   }));
   app.eyes = guard('eyes', () => new Eyes());
@@ -169,42 +228,99 @@ async function boot() {
   }));
 
   // 4. panels
-  app.chat = guard('chat', () => new Chat({ voice: app.voice, onActivity: setActivity }));
+  app.chat = guard('chat', () => new Chat({
+    voice: app.voice,
+    onActivity: setActivity,
+    onSend: () => setDock(true),
+    onReply: (text) => {
+      const ticker = document.getElementById('dock-ticker');
+      if (ticker) ticker.textContent = text || '';
+    },
+  }));
   app.armory = guard('armory', () => new Armory());
   app.settings = guard('settings', () => new Settings({
     onLanguageChange: (code) => applyLanguage(code),
     onConfigChange: (next) => {
       state.set({ config: next });
       applyMotion(!!next.reduced_motion);
+      app.avatar?.setLabel(next.hud_label || 'J.A.R.V.I.S.');
       app.magnifier?.setVisible(next.magnifier_enabled !== false);
       app.mic?.refreshLanguage();
       app.voice?.resetWarnings();
+      app.modes?.render();
     },
   }));
   app.magnifier = guard('magnifier', () => new Magnifier());
   app.magnifier?.setVisible(!config || config.magnifier_enabled !== false);
 
-  // 5. status polling
+  // 5. the five function switches
+  app.modes = guard('modes', () => new Modes({
+    avatar: app.avatar,
+    eyes: app.eyes,
+    mic: app.mic,
+    voice: app.voice,
+    onOpenView: setView,
+    onNote: setNote,
+  }));
+
+  // 6. status polling
   app.status = guard('status', () => new Status());
   app.status?.start();
 
-  // 6. wiring
+  // 7. wiring
+  document.getElementById('btn-nav')?.addEventListener('click', () => {
+    setNav(root?.getAttribute('data-nav') !== 'open');
+  });
+  document.getElementById('btn-nav-close')?.addEventListener('click', () => setNav(false));
+  document.getElementById('scrim')?.addEventListener('click', () => {
+    setNav(false);
+    if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
+  });
+  document.getElementById('btn-sheet-close')?.addEventListener('click', () => setView('home'));
+
   document.querySelectorAll('.menu-btn').forEach((button) => {
-    button.addEventListener('click', () => setView(button.dataset.view));
+    button.addEventListener('click', () => {
+      setView(button.dataset.view);
+      setNav(false);
+    });
   });
   document.getElementById('btn-open-settings')?.addEventListener('click', () => setView('settings'));
-  document.querySelectorAll('.av-btn').forEach((button) => {
+
+  document.querySelectorAll('.mode-btn').forEach((button) => {
     button.addEventListener('click', () => applyAvatarMode(button.dataset.mode, { persist: true }));
   });
+
+  document.getElementById('btn-dock')?.addEventListener('click', () => {
+    setDock(root?.getAttribute('data-dock') !== 'expanded');
+  });
+  document.getElementById('chat-input')?.addEventListener('focus', () => setDock(true));
+
   document.getElementById('btn-exit')?.addEventListener('click', onExit);
 
-  on('power:standby', () => { setActivity('idle'); app.status?.schedule(); });
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (root?.getAttribute('data-nav') === 'open') setNav(false);
+    else if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
+    else if (root?.getAttribute('data-dock') === 'expanded') setDock(false);
+  });
+
+  on('power:standby', () => {
+    app.modes?.stopAll('standby');
+    setNote('');
+    setActivity('idle');
+    app.status?.schedule();
+  });
   on('power:active', () => { setActivity('idle'); app.status?.refresh(); });
   on('mic:on', () => setActivity('listening'));
-  on('mic:off', () => { if (state.get('activity') === 'listening') setActivity('idle'); });
+  on('mic:off', () => {
+    app.modes?.micWentOff();
+    if (state.get('activity') === 'listening') setActivity('idle');
+  });
 
   setActivity('idle');
-  setView('chat');
+  setView('home');
+  setNav(false);
+  setDock(false);
 
   const problems = missingKeys();
   if (Object.keys(problems).length) console.warn('[i18n] incomplete translations', problems);
@@ -215,6 +331,7 @@ async function boot() {
 /** EXIT is separate from STANDBY: it shuts the interface down, server keeps running. */
 function onExit() {
   if (!window.confirm(t('power.exitConfirm'))) return;
+  app.modes?.stopAll('exit');
   app.mic?.mute('exit');
   app.eyes?.stop('exit');
   app.voice?.stop();
@@ -222,7 +339,7 @@ function onExit() {
   app.status?.stop();
   api.setPower('standby').catch(() => {});
   document.body.innerHTML =
-    `<div style="display:grid;place-items:center;height:100dvh;color:#7fa8c0;
+    `<div style="display:grid;place-items:center;height:100dvh;color:#74a0a8;
       font-family:system-ui,sans-serif;text-align:center;padding:24px;font-size:14px">
       ${t('power.exitDone')}
      </div>`;
@@ -251,4 +368,4 @@ boot().catch((err) => {
 });
 
 // Exposed for debugging from the Chrome console on the phone.
-window.JARVIS = { app, state, setView, setActivity, applyLanguage, applyAvatarMode };
+window.JARVIS = { app, state, setView, setActivity, setDock, setNav, applyLanguage, applyAvatarMode };

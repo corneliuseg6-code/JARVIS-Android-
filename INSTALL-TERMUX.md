@@ -32,7 +32,7 @@ or, from git:
 ```bash
 git clone https://github.com/corneliuseg6-code/JARVIS-Android- jarvis
 cd jarvis
-git checkout claude/jarvis-android-v2-upgrade-3whm86
+git checkout claude/new-session-doztv0
 ```
 
 Optional guided setup (it asks before each optional component):
@@ -40,6 +40,36 @@ Optional guided setup (it asks before each optional component):
 ```bash
 ./install-termux.sh
 ```
+
+### Updating an install you already have
+
+This branch is kept separate from `main`, so it never touches the copy already
+on your phone unless you ask for it. To pull the redesigned interface into an
+existing clone:
+
+```bash
+cd ~/jarvis
+./stop.sh                                   # if it is running
+git fetch origin claude/new-session-doztv0
+git checkout claude/new-session-doztv0
+git pull origin claude/new-session-doztv0
+chmod +x start.sh stop.sh install-termux.sh
+./start.sh
+```
+
+To try it **beside** your current install instead of upgrading it, clone it to
+a second folder and run it on a second port — both can be installed as PWAs:
+
+```bash
+cd ~
+git clone -b claude/new-session-doztv0 https://github.com/corneliuseg6-code/JARVIS-Android- jarvis-v21
+cd jarvis-v21
+chmod +x start.sh stop.sh install-termux.sh
+JARVIS_PORT=8788 ./start.sh                 # then open http://127.0.0.1:8788
+```
+
+Your settings, conversations and voices live in `~/.jarvis/`, outside the
+project folder, so both copies read the same data and neither can delete it.
 
 ---
 
@@ -63,6 +93,28 @@ Stop it with `Ctrl-C`, or from another Termux session:
 ```bash
 ./stop.sh
 ```
+
+---
+
+## 3b. Finding your way around
+
+* **☰** (top left) opens the navigation drawer: Home, Tool Armory, Eyes,
+  Settings, the language picker, the magnifier and EXIT.
+* The **visualiser** fills the middle of the screen. **RINGS / FACE** directly
+  below it switches between the two, and the choice is saved.
+* **MUTE** and **ACTIVE / STANDBY** are the two wide buttons under that. The
+  microphone is muted every time JARVIS starts, and nothing re-opens it on its
+  own.
+* The five small switches are **EYES** (camera), **WATCH** (screen capture —
+  greyed out on Android, see LIMITATIONS.md), **HOLO** (drag or tilt to turn
+  the projection), **FOCUS** (a timed session that counts how often you leave
+  JARVIS) and **REFLEX** (hands-free: the mic stays open and only a sentence
+  containing the wake word is acted on).
+* The **bar at the bottom** is the chat. Type in it, or drag its handle up to
+  open the full conversation with History and New.
+
+Settings → Assistant holds the wake word, the length of a FOCUS session and the
+text in the middle of the rings.
 
 ---
 
@@ -223,7 +275,9 @@ command: python3 ~/jarvis/tools/mock_mcp_server.py
 | "Ollama: Disconnected" | `ollama serve` is not running, or the address in Settings is wrong |
 | "Voice: Disconnected" | no sherpa-onnx or no model — Settings → Voice shows which |
 | Microphone does nothing | Chrome blocks the mic on non-secure origins; use `127.0.0.1`, and grant the permission |
-| Everything is tiny / too large | the magnifier under the main menu, or its ↺ reset |
+| Everything is tiny / too large | the magnifier in the drawer (☰), or its ↺ reset |
+| WATCH is greyed out | Android browsers have no screen-capture API; the switch says so. It works in the desktop/PWA build. |
+| REFLEX hears nothing | the browser's speech recognition needs Google speech services and a network connection on most devices (see LIMITATIONS.md) |
 
 A full diagnosis in one command:
 
