@@ -190,5 +190,7 @@ export default {
   "settings.wakeWord": "Mot d'activation",
   "settings.wakeWordHint": "R\u00e9flexe ne r\u00e9pond qu'\u00e0 une phrase contenant ce mot.",
   "settings.focusMinutes": "S\u00e9ance de focus (minutes)",
-  "settings.hudLabel": "Texte au centre des anneaux"
+  "settings.hudLabel": "Texte au centre des anneaux",
+  "immersive.enter": "Touchez le visualiseur pour le plein \u00e9cran",
+  "immersive.exit": "Quitter le plein \u00e9cran"
 };

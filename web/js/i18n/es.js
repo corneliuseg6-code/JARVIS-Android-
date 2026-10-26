@@ -190,5 +190,7 @@ export default {
   "settings.wakeWord": "Palabra de activaci\u00f3n",
   "settings.wakeWordHint": "Reflejo solo responde a una frase que contenga esta palabra.",
   "settings.focusMinutes": "Sesi\u00f3n de enfoque (minutos)",
-  "settings.hudLabel": "Texto en el centro de los anillos"
+  "settings.hudLabel": "Texto en el centro de los anillos",
+  "immersive.enter": "Toca el visualizador para pantalla completa",
+  "immersive.exit": "Salir de pantalla completa"
 };

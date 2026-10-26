@@ -53,7 +53,8 @@ can take space from the visualiser or push a control off the screen.
 
 | Area | Status |
 |---|---|
-| **Two visualisers** | RINGS (a layered instrument dial: tick crowns, segmented arcs, orbiting satellites, two real 3D gyro rings, reactive core) and FACE (a sculpted holographic head with rim-lit wireframe, blinking eyes and a jaw that moves with speech). There is no cube. |
+| **Two visualisers** | RINGS (a layered instrument dial: tick crowns, segmented arcs, orbiting satellites, two real 3D gyro rings, reactive core) and FACE (a translucent blue holographic bust — head, hair, neck and shoulders — rendered in WebGL with fresnel rim light, directional shading, scan lines, particles, blinking and a jaw that moves with speech). There is no cube. |
+| **Immersive mode** | Tap the visualiser and it fills the screen; every control folds away. Tap again to bring them back. |
 | **EYES** | Camera with front/rear switch, a visible indicator, local vision through Ollama. |
 | **WATCH** | Screen capture through `getDisplayMedia`. **Android browsers have no such API** — the switch says so and stays off rather than pretending. |
 | **HOLO** | Drag the projection, or tilt the phone, and the visualiser turns with it. |
@@ -80,7 +81,9 @@ server/      Python backend (standard library only)
   ollama.py      Ollama client          conversations.py
 web/         Frontend (plain ES modules, no bundler)
   index.html  css/jarvis.css  sw.js  manifest.webmanifest
-  js/avatar/   rings.js  face.js  index.js
+  js/avatar/   index.js  rings.js        (Canvas 2D dial)
+               face3d.js head-mesh.js    (WebGL hologram bust)
+               face.js                   (Canvas 2D fallback head)
   js/i18n/     ro en fr de es it + index.js
   js/ui/       mic power modes magnifier chat armory eyes settings status voice toast
   js/core/     api.js  state.js  bus.js

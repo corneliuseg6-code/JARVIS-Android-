@@ -65,6 +65,7 @@ def check_frontend():
     required = [
         "index.html", "sw.js", "manifest.webmanifest", "css/jarvis.css", "js/app.js",
         "js/avatar/index.js", "js/avatar/rings.js", "js/avatar/face.js",
+        "js/avatar/face3d.js", "js/avatar/head-mesh.js",
         "js/i18n/index.js", "js/ui/mic.js", "js/ui/power.js", "js/ui/magnifier.js",
         "js/ui/armory.js", "js/ui/eyes.js", "js/ui/settings.js", "js/ui/chat.js",
         "js/ui/modes.js",
@@ -82,6 +83,9 @@ def check_frontend():
         ('id="drawer"', "collapsible navigation drawer"),
         ('id="dock"', "bottom chat bar"),
         ('id="sheet"', "panel sheet"),
+        ('id="avatar-gl"', "WebGL canvas for the hologram"),
+        ('id="btn-immersive-exit"', "immersive-mode exit"),
+        ("interactive-widget=resizes-content", "keyboard-safe viewport"),
     ):
         (ok if element in html else bad)(label)
     for name in ("eyes", "watch", "holo", "focus", "reflex"):

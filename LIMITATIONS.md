@@ -126,6 +126,39 @@ Checked at **412×915** and **360×800** against the running backend:
 
 ---
 
+## The holographic bust (FACE)
+
+| Claim | Status |
+|---|---|
+| It is a real 3D surface, shaded and animated in WebGL | **Verified.** The context comes up, the bust renders, the jaw and lids animate in the vertex shader, and the fallback path was exercised by forcing a failure. |
+| It is photoreal | **No, and it does not claim to be.** It is an original stylised model built from a cross-section profile and twenty-two anatomical deformers. There is no scanned or licensed head model in this repository, and none is downloaded. |
+| It is a likeness of anyone | **No.** The anatomy is generic and procedural. |
+| It runs well on a phone GPU | **Not measured.** The only renderer available in this session was SwiftShader — Chromium's pure-CPU rasteriser, with no GPU at all — where the bust manages single-digit frames. That number says nothing about an Adreno: it is a software rasteriser running a shader with heavy overdraw. What *is* in the code is a frame-time watchdog that measures real frames and sheds the glow passes, the mesh overlay and the particles if they are not being hit, and a fallback to the Canvas 2D head if WebGL is refused outright. **Check it on your phone**: if FACE feels heavy, RINGS is the cheap mode and switching is one tap. |
+| RINGS performance | **Verified at 60fps** in the same software renderer, so it has a very large margin on real hardware. |
+
+The reference video never shows FACE mode — the visualiser is RINGS for its
+whole 12 minutes — so the bust was built against the reference *image* and the
+written description, not against footage of it animating.
+
+## Immersive mode
+
+Verified: a tap on the stage expands the visualiser to the full screen and
+folds the top bar, status strip, HUD and chat dock away; a second tap, the ✕,
+or Escape restores them; it works in both RINGS and FACE; and a drag of more
+than 12px (a HOLO turn) does not trigger it.
+
+## Galaxy S25 Ultra
+
+The layout was checked at **412×915** and **360×800** CSS pixels with a mobile
+user agent, which is the viewport Chrome reports on that class of device — not
+on the device itself. Nothing was off screen, nothing scrolled sideways, and
+focusing the chat input left the dock on screen. The physical 1440×3120 panel
+is never used as a layout dimension; the device pixel ratio is capped at 2 for
+the 2D canvas and 1.75 for WebGL, deliberately.
+
+Not verified without the phone: the real on-screen keyboard, the real gesture
+bar and status bar insets, 120Hz behaviour, and real battery drain.
+
 ## The five function switches — what each one can actually do
 
 | Switch | On Android | Why |

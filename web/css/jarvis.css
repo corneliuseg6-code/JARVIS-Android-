@@ -36,6 +36,9 @@
   --tap:           40px;
   --safe-b:        env(safe-area-inset-bottom, 0px);
   --safe-t:        env(safe-area-inset-top, 0px);
+  /* How much of the screen the on-screen keyboard is covering. Set from
+     visualViewport, and 0 on any browser that resizes the layout itself. */
+  --kb:            0px;
 }
 
 * { box-sizing: border-box; }
@@ -76,7 +79,7 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   flex-direction: column;
   height: 100dvh;
   max-height: 100dvh;
-  padding: calc(var(--safe-t) + 4px) 10px calc(var(--safe-b) + 4px);
+  padding: calc(var(--safe-t) + 4px) 10px calc(var(--safe-b) + 4px + var(--kb));
   gap: 5px;
   font-size: calc(15px * var(--zoom));
 }
@@ -196,6 +199,18 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   position: absolute; left: 8px; top: 6px;
   font-size: .56em; letter-spacing: .26em; text-transform: uppercase;
   color: rgba(141, 243, 236, .55); pointer-events: none;
+}
+
+/* The only control left on screen in immersive mode; tapping anywhere else
+   also leaves, but a visible way out matters on a phone. */
+.stage-exit {
+  position: absolute; right: 10px; z-index: 6;
+  top: calc(var(--safe-t) + 10px);
+  width: 36px; height: 36px; padding: 0;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: rgba(4, 14, 24, .72); color: var(--teal);
+  font-size: .8em; cursor: pointer; display: grid; place-items: center;
+  backdrop-filter: blur(3px);
 }
 
 .stage-note {
@@ -655,6 +670,53 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .56em;
   white-space: pre-wrap; word-break: break-all; color: var(--text-dim);
   max-height: 22dvh; overflow: auto;
+}
+
+/* ===================== immersive mode =====================
+   Tap the visualiser and it takes the whole screen: every other row collapses
+   to nothing and the stage, which is the only element with flex-grow, expands
+   into the space. Tap again and they come back.
+
+   The rows animate their height rather than being switched off, so the
+   transition is smooth and the canvas — watched by a ResizeObserver — keeps
+   step with it instead of jumping at the end. */
+.topbar, .statusbar, .hud, .dock {
+  transition:
+    opacity .20s ease,
+    transform .20s ease,
+    max-height .26s ease,
+    margin .26s ease,
+    padding .26s ease;
+  max-height: 60dvh;
+}
+
+.app[data-immersive="on"] {
+  padding: 0 0 var(--kb);
+  gap: 0;
+}
+.app[data-immersive="on"] > .topbar,
+.app[data-immersive="on"] > .statusbar,
+.app[data-immersive="on"] > .hud,
+.app[data-immersive="on"] > .dock {
+  max-height: 0;
+  min-height: 0;
+  opacity: 0;
+  transform: translateY(6px);
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.app[data-immersive="on"] .stage {
+  border-radius: 0;
+  /* Edge to edge, but never under the status bar or the gesture bar. */
+  padding: var(--safe-t) 0 var(--safe-b);
+}
+.app[data-immersive="on"] .stage-tag {
+  left: 14px;
+  top: calc(var(--safe-t) + 10px);
 }
 
 /* ===================== toasts ===================== */

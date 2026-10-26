@@ -190,5 +190,7 @@ export default {
   "settings.wakeWord": "Cuv\u00e2nt de activare",
   "settings.wakeWordHint": "Reflex r\u0103spunde doar la o fraz\u0103 care con\u021bine acest cuv\u00e2nt.",
   "settings.focusMinutes": "Sesiune de focus (minute)",
-  "settings.hudLabel": "Text \u00een centrul inelelor"
+  "settings.hudLabel": "Text \u00een centrul inelelor",
+  "immersive.enter": "Atinge vizualizatorul pentru ecran complet",
+  "immersive.exit": "Ie\u0219i din ecran complet"
 };

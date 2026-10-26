@@ -190,5 +190,7 @@ export default {
   "settings.wakeWord": "Parola di attivazione",
   "settings.wakeWordHint": "Riflesso risponde solo a una frase che contiene questa parola.",
   "settings.focusMinutes": "Sessione di focus (minuti)",
-  "settings.hudLabel": "Testo al centro degli anelli"
+  "settings.hudLabel": "Testo al centro degli anelli",
+  "immersive.enter": "Tocca il visualizzatore per schermo intero",
+  "immersive.exit": "Esci da schermo intero"
 };

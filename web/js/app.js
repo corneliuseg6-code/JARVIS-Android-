@@ -115,6 +115,86 @@ function setView(view) {
   requestAnimationFrame(() => app.avatar?.resize());
 }
 
+/**
+ * Immersive mode: the visualiser takes the whole screen and every control
+ * folds away. Tap the stage to enter, tap it again (or the ✕, or Escape) to
+ * come back. The backend, the microphone, the voice and the conversation all
+ * keep running — only the chrome goes.
+ */
+function setImmersive(on) {
+  if (state.get('immersive') === on) return;
+  state.set({ immersive: on });
+  root?.setAttribute('data-immersive', on ? 'on' : 'off');
+  const exit = document.getElementById('btn-immersive-exit');
+  if (exit) exit.hidden = !on;
+  if (on) {
+    setNav(false);
+    setDock(false);
+    if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
+  }
+  // Follow the rows while they fold, so the canvas grows with the stage
+  // instead of snapping to its new size when the transition ends.
+  const until = performance.now() + 420;
+  const pump = () => {
+    app.avatar?.resize();
+    if (performance.now() < until) requestAnimationFrame(pump);
+  };
+  requestAnimationFrame(pump);
+}
+
+/**
+ * A tap on the stage toggles immersive mode — but the stage is also where
+ * HOLO is dragged, so only a press that barely moved and ended quickly counts
+ * as a tap.
+ */
+function wireStageTap() {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  let start = null;
+  stage.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('button')) return;      // the ✕ has its own job
+    start = { x: event.clientX, y: event.clientY, t: performance.now() };
+  });
+  stage.addEventListener('pointerup', (event) => {
+    if (!start) return;
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    const elapsed = performance.now() - start.t;
+    start = null;
+    if (moved < 12 && elapsed < 400) setImmersive(!state.get('immersive'));
+  });
+  stage.addEventListener('pointercancel', () => { start = null; });
+}
+
+/**
+ * Keep the interface inside the part of the screen the user can actually see.
+ *
+ * `interactive-widget=resizes-content` in the viewport meta makes Chrome shrink
+ * the layout viewport when the keyboard opens, which is all modern Android
+ * needs. This covers the rest: older Chrome, and the moment between the
+ * keyboard appearing and the layout settling.
+ */
+function trackViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const apply = () => {
+    const active = document.activeElement;
+    const typing = !!active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT');
+    // Only while typing: a pinch-zoom also shrinks the visual viewport, and
+    // treating that as a keyboard would squash the layout for no reason.
+    const keyboard = typing
+      ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
+      : 0;
+    document.documentElement.style.setProperty('--kb', keyboard + 'px');
+    app.avatar?.resize();
+  };
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  window.addEventListener('orientationchange', () => setTimeout(apply, 150));
+  document.addEventListener('focusin', apply);
+  document.addEventListener('focusout', () => setTimeout(apply, 60));
+  apply();
+}
+
 function setNote(text, warn) {
   const note = document.getElementById('stage-note');
   if (!note) return;
@@ -206,7 +286,10 @@ async function boot() {
   applyTranslations();
 
   // 2. avatar
-  app.avatar = guard('avatar', () => new Avatar(document.getElementById('avatar-canvas')));
+  app.avatar = guard('avatar', () => new Avatar(
+    document.getElementById('avatar-canvas'),
+    document.getElementById('avatar-gl'),
+  ));
   app.avatar?.start();
   applyAvatarMode((config && config.avatar_mode) || local.avatarMode || 'rings');
   applyMotion(!!(config && config.reduced_motion));
@@ -297,9 +380,17 @@ async function boot() {
 
   document.getElementById('btn-exit')?.addEventListener('click', onExit);
 
+  wireStageTap();
+  trackViewport();
+  document.getElementById('btn-immersive-exit')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setImmersive(false);
+  });
+
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
-    if (root?.getAttribute('data-nav') === 'open') setNav(false);
+    if (state.get('immersive')) setImmersive(false);
+    else if (root?.getAttribute('data-nav') === 'open') setNav(false);
     else if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
     else if (root?.getAttribute('data-dock') === 'expanded') setDock(false);
   });
@@ -321,6 +412,7 @@ async function boot() {
   setView('home');
   setNav(false);
   setDock(false);
+  root?.setAttribute('data-immersive', 'off');
 
   const problems = missingKeys();
   if (Object.keys(problems).length) console.warn('[i18n] incomplete translations', problems);
@@ -368,4 +460,7 @@ boot().catch((err) => {
 });
 
 // Exposed for debugging from the Chrome console on the phone.
-window.JARVIS = { app, state, setView, setActivity, setDock, setNav, applyLanguage, applyAvatarMode };
+window.JARVIS = {
+  app, state, setView, setActivity, setDock, setNav, setImmersive,
+  applyLanguage, applyAvatarMode,
+};

@@ -190,5 +190,7 @@ export default {
   "settings.wakeWord": "Aktivierungswort",
   "settings.wakeWordHint": "Reflex reagiert nur auf einen Satz mit diesem Wort.",
   "settings.focusMinutes": "Fokus-Sitzung (Minuten)",
-  "settings.hudLabel": "Text in der Mitte der Ringe"
+  "settings.hudLabel": "Text in der Mitte der Ringe",
+  "immersive.enter": "Visualisierung antippen f\u00fcr Vollbild",
+  "immersive.exit": "Vollbild verlassen"
 };

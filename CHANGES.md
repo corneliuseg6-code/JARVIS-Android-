@@ -2,6 +2,84 @@
 
 ---
 
+# V2.2 — the holographic bust, immersive mode, S25 Ultra
+
+## FACE is now WebGL, not a wireframe
+
+The Canvas 2D face read as a flat mask no matter how much the geometry was
+improved, and the reason was structural: a wireframe has no surface, so it has
+no shading, and shading is what makes a head look like a head. It has been
+replaced rather than adjusted.
+
+`head-mesh.js` builds the anatomy; `face3d.js` renders it.
+
+* **Two swept surfaces** — head, and neck-into-shoulders — so the chin can sit
+  in front of the throat. A single sweep cannot do that: both would need the
+  same height.
+* **Measured cross-sections.** Fourteen rings from crown to chin, nine more
+  down to the chest, each with a half-width, a half-depth, a z-centre and a
+  flattening exponent, interpolated with a Catmull-Rom spline.
+* **Twenty-two anatomical deformers** on the face alone: brow ridge, glabella,
+  temple hollow, eye sockets, eyeballs, upper and lower lids, nasion, dorsum,
+  tip, alar wings, nostril sills, philtrum, both lips, the line between them,
+  zygomatic arch, buccal hollow, nasolabial fold, masseter, mental
+  protuberance and the crease above it — plus ears, placed sideways rather
+  than forwards.
+* **Short hair as 96 strands** sweeping back from a parting, stopping at a
+  hairline that dips over the temples and running lower behind the ears.
+* **Feature curves**: brows (four strands each), the almond of each eye and
+  its crease, the bridge of the nose and its wings, the fold beside the mouth,
+  the three lines of the lips, the jawline, the cords of the neck, the
+  collarbones. These are what the eye reads a face by.
+* **Hologram material**: fresnel rim light for volume, a key and fill
+  direction for the relief (without it a nose pointing at the camera is
+  invisible), drifting scan lines, a travelling scan band, interference
+  flicker and occasional tearing, depth tint, drifting particles and a
+  volumetric wash. Additive, no depth buffer, so front and back add together
+  and the bust is genuinely translucent.
+* **Animation in the vertex shader**: the jaw is a real rotation about a hinge
+  behind the ear, driven by a per-vertex weight and the live voice level; the
+  lids close over the eyeballs the same way. Idle yaw and pitch, and HOLO
+  tilt, ride on top.
+* WebGL 1, no extensions, no library, no build step — about five draw calls.
+
+RINGS stays Canvas 2D. The two live on separate canvases, because a canvas can
+only ever hold one kind of context. If WebGL is refused, FACE falls back to the
+old Canvas 2D head rather than leaving the stage blank.
+
+**What it is not:** an original stylised model, not a photoreal scan and not a
+likeness of anyone. There is no licensed head model in the repository and none
+is downloaded — voice models are already the largest thing here, and a
+photoreal head would dwarf them.
+
+## Immersive mode
+
+Tap the visualiser and it fills the screen: the top bar, the status strip, the
+HUD and the chat dock collapse to nothing and the stage, the only element with
+flex-grow, expands into the space. Tap again, press Escape, or use the ✕ to
+come back. The rows animate their height rather than switching off, so the
+canvas — watched by a ResizeObserver — grows with the stage instead of jumping
+at the end. A press only counts as a tap if it moved less than 12px and ended
+within 400ms, so it never fires on a HOLO drag. The backend, the microphone,
+the voice and the conversation all keep running.
+
+## Galaxy S25 Ultra
+
+* `interactive-widget=resizes-content` makes Chrome shrink the layout viewport
+  when the keyboard opens, so the chat bar stays above it.
+* A `visualViewport` listener covers browsers that do not, setting a `--kb`
+  inset — only while an input is focused, because a pinch-zoom also shrinks
+  the visual viewport and must not be mistaken for a keyboard.
+* The device pixel ratio is capped: 2 for the 2D canvas, 1.75 for WebGL. The
+  S25 Ultra reports 3.5, and a full-ratio buffer is around 12× the fill cost
+  of a 1× one for a difference invisible on a 6.9" panel. It is the single
+  biggest thing the visualiser can do to a battery.
+* A frame-time watchdog measures real frames: under ~36fps it drops the bust's
+  glow passes, then its mesh overlay and particles; over ~55fps it takes them
+  back, with hysteresis so it cannot oscillate.
+
+---
+
 # V2.1 — the interface redesign
 
 Built against the reference recording and its transcript, which were analysed

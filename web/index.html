@@ -2,7 +2,10 @@
 <html lang="ro" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<!-- interactive-widget=resizes-content makes Chrome shrink the layout viewport
+     when the on-screen keyboard opens, so the chat bar stays above it instead
+     of being covered. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5, interactive-widget=resizes-content">
 <meta name="theme-color" content="#04080f">
 <meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
@@ -45,9 +48,14 @@
 
   <!-- ===================== visualiser ===================== -->
   <main class="stage" id="stage">
+    <!-- Two canvases: a canvas can hold only one kind of context, and RINGS is
+         Canvas 2D while FACE is WebGL. Only the active one is shown. -->
     <canvas id="avatar-canvas" class="avatar-canvas" aria-hidden="true"></canvas>
+    <canvas id="avatar-gl" class="avatar-canvas" aria-hidden="true" hidden></canvas>
 
     <div class="stage-tag" id="stage-tag" aria-hidden="true">RINGS</div>
+    <button class="stage-exit" id="btn-immersive-exit" type="button" hidden
+            data-i18n-aria="immersive.exit" data-i18n-title="immersive.exit">✕</button>
     <div class="stage-note" id="stage-note" hidden></div>
 
     <div class="standby-veil" id="standby-veil" hidden>

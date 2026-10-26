@@ -190,5 +190,7 @@ export default {
   "settings.wakeWord": "Wake word",
   "settings.wakeWordHint": "Reflex only answers a sentence containing this word.",
   "settings.focusMinutes": "Focus session (minutes)",
-  "settings.hudLabel": "Text in the centre of the rings"
+  "settings.hudLabel": "Text in the centre of the rings",
+  "immersive.enter": "Tap the visualiser to fill the screen",
+  "immersive.exit": "Leave full screen"
 };

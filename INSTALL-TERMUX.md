@@ -101,7 +101,11 @@ Stop it with `Ctrl-C`, or from another Termux session:
 * **☰** (top left) opens the navigation drawer: Home, Tool Armory, Eyes,
   Settings, the language picker, the magnifier and EXIT.
 * The **visualiser** fills the middle of the screen. **RINGS / FACE** directly
-  below it switches between the two, and the choice is saved.
+  below it switches between the two, and the choice is saved. RINGS is the
+  instrument dial; FACE is the holographic bust, drawn with WebGL.
+* **Tap the visualiser** and it takes the whole screen, with every control
+  folded away. Tap again — or press the ✕ in the corner — to bring them back.
+  JARVIS keeps listening and talking the whole time.
 * **MUTE** and **ACTIVE / STANDBY** are the two wide buttons under that. The
   microphone is muted every time JARVIS starts, and nothing re-opens it on its
   own.
@@ -277,6 +281,8 @@ command: python3 ~/jarvis/tools/mock_mcp_server.py
 | Microphone does nothing | Chrome blocks the mic on non-secure origins; use `127.0.0.1`, and grant the permission |
 | Everything is tiny / too large | the magnifier in the drawer (☰), or its ↺ reset |
 | WATCH is greyed out | Android browsers have no screen-capture API; the switch says so. It works in the desktop/PWA build. |
+| FACE feels heavy or warm | It is a shaded 3D bust. JARVIS sheds its glow passes automatically below ~36fps, but RINGS is the cheap mode — switching is one tap. *Reduced animations* in Settings lowers both. |
+| FACE looks like the old flat head | WebGL was refused, so it fell back to the Canvas 2D face. Check `chrome://gpu`, and that hardware acceleration is on. |
 | REFLEX hears nothing | the browser's speech recognition needs Google speech services and a network connection on most devices (see LIMITATIONS.md) |
 
 A full diagnosis in one command:
