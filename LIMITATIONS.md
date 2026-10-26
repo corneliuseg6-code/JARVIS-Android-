@@ -161,6 +161,20 @@ the 2D canvas and 1.75 for WebGL, deliberately.
 Not verified without the phone: the real on-screen keyboard, the real gesture
 bar and status bar insets, 120Hz behaviour, and real battery drain.
 
+## OpenAI — what was and was not verified
+
+| Claim | Status |
+|---|---|
+| The key cannot reach the browser | **Verified.** A probe key was stored, then every public surface was searched for it: `/api/config`, `/api/health`, `/api/diagnostics`, `/api/llm/status` and the settings document — all clean. There is no endpoint that returns a key, and `/api/config` strips credential-shaped fields. `secrets.json` is mode 600. Re-checkable with `tools/test_provider.py`. |
+| A paid provider cannot switch itself on | **Verified.** The switch is refused until the cost acknowledgement is set, and an unknown provider name falls back to Ollama. Enforced in `config.update_config()`, so this holds against a hand-edited `config.json` too. |
+| Errors are translated into something actionable | **Verified against synthetic responses** — HTTP 401, 403, 404, 429 (both out-of-credit and rate-limited), 500 and an unexpected code each map to the right stable code, and the key never appears in the surfaced text. |
+| The streaming path works end to end | **Partly.** The chat endpoint was driven with the provider set to OpenAI: it emitted `start` carrying the provider, then a structured `error` event with a code and detail, and the frontend rendered it. That exercises routing, streaming and error handling. |
+| **A real completion from OpenAI** | **Not verified.** `api.openai.com` is blocked by this build environment's egress proxy, so no live call could be made with a real key. The request shape, SSE parsing and `[DONE]` handling follow the documented API but have not been run against the real service. **This is the one thing to check first on your phone** — ask JARVIS anything with the provider set to OpenAI. |
+| Cost figures | **Not quoted anywhere**, deliberately. Rates change; the interface points at OpenAI's pricing page instead of printing numbers that would go stale. |
+
+Vision (EYES) routes through the same provider, so on OpenAI a described
+frame is a billed request. The status says so.
+
 ## The five function switches — what each one can actually do
 
 | Switch | On Android | Why |

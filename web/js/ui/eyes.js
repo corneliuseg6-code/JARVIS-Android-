@@ -10,7 +10,7 @@
  */
 import { api } from '../core/api.js';
 import * as state from '../core/state.js';
-import { t } from '../i18n/index.js';
+import { t, tLLMError } from '../i18n/index.js';
 import { toast } from './toast.js';
 
 export default class Eyes {
@@ -133,7 +133,9 @@ export default class Eyes {
           ? data.text
           : (data.error === 'model_missing' ? t('eyes.modelMissing') + (data.detail ? ' — ' + data.detail : '')
             : data.error === 'vision_disabled' ? t('eyes.visionDisabled')
-            : (data.detail || t('error.generic')));
+            // Vision goes through the same provider as chat, so it fails in
+            // the same ways — a rejected key, no credit, a bad model name.
+            : tLLMError(data.error, data.detail));
       }
     } catch (err) {
       if (this.result) this.result.textContent = t('error.network');

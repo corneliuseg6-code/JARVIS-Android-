@@ -147,6 +147,36 @@ Without Ollama, the interface still works — chat answers report
 
 ---
 
+## 4b. OpenAI instead of Ollama (optional, **paid**)
+
+Ollama stays the default and stays free. If you want OpenAI as well:
+
+1. Create a key at `platform.openai.com` → API keys.
+2. **Set a spend limit** in your OpenAI account first. JARVIS cannot see your
+   balance and cannot stop you from spending.
+3. In JARVIS: **Settings → Brain**, read the cost notice, tick the
+   acknowledgement, paste the key, press Save, then set the model.
+4. Switch *Language model* to **OpenAI — paid API**.
+
+What it costs, plainly: OpenAI bills by the amount of text sent and received,
+on every request. Because each turn resends the recent conversation, a long
+conversation costs more per reply than a short one — *Messages resent each
+turn* in the same panel controls that window. Check current rates on OpenAI's
+pricing page; they change, so this file does not quote them.
+
+The key is written to `~/.jarvis/secrets.json` (chmod 600) on the phone. It is
+never sent to the browser and never appears in any API response — there is no
+endpoint that returns it. Removing the key also switches JARVIS back to
+Ollama, so nothing is left failing.
+
+To check all of this without spending anything:
+
+```bash
+python3 tools/test_provider.py
+```
+
+---
+
 ## 5. Offline voices (optional)
 
 ### 5.1 The engine
@@ -277,6 +307,10 @@ command: python3 ~/jarvis/tools/mock_mcp_server.py
 | Page loads but nothing reacts | open Chrome DevTools (`chrome://inspect` from a PC) — JARVIS also posts JS errors to the Termux console |
 | "Server: Disconnected" chip | the backend died; look at the Termux output |
 | "Ollama: Disconnected" | `ollama serve` is not running, or the address in Settings is wrong |
+| "The API key was rejected" | the key is wrong, revoked, or belongs to another account — paste it again in Settings → Brain |
+| "The OpenAI account is out of credit" | add credit at platform.openai.com; JARVIS cannot see your balance |
+| "That model name does not exist" | fix the model in Settings → Brain; the field suggests the models your key can actually use |
+| The brain chip is amber | connected, but the chosen model is not available to you |
 | "Voice: Disconnected" | no sherpa-onnx or no model — Settings → Voice shows which |
 | Microphone does nothing | Chrome blocks the mic on non-secure origins; use `127.0.0.1`, and grant the permission |
 | Everything is tiny / too large | the magnifier in the drawer (☰), or its ↺ reset |

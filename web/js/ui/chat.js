@@ -1,7 +1,7 @@
 /** Conversation panel: streaming answers, history, replay of speech. */
 import { api, chatStream } from '../core/api.js';
 import * as state from '../core/state.js';
-import { t } from '../i18n/index.js';
+import { t, tLLMError } from '../i18n/index.js';
 import { toast } from './toast.js';
 
 export default class Chat {
@@ -168,11 +168,8 @@ export default class Chat {
           this.messages.scrollTop = this.messages.scrollHeight;
         },
         onError: (data) => {
-          const message = data.code === 'ollama_error' ? t('error.ollama')
-            : data.code === 'network' ? t('error.network')
-            : t('error.generic');
           bubble.classList.add('msg-error');
-          body.textContent = message + (data.detail ? ' — ' + data.detail : '');
+          body.textContent = tLLMError(data.code, data.detail);
         },
         onDone: (data) => {
           const finalText = (data.text || answer).trim();

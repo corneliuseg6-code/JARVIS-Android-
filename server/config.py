@@ -46,6 +46,17 @@ DEFAULTS: dict[str, Any] = {
     "voice_override": "",            # manual pick; empty = follow language
     "tts_speed": 1.0,
     # --- models ----------------------------------------------------------
+    # Which brain answers. "ollama" is free, local and offline; "openai" is
+    # a paid remote API. Switching to a billed provider needs an explicit
+    # acknowledgement, enforced in update_config() rather than only in the UI.
+    "llm_provider": "ollama",            # "ollama" | "openai"
+    "openai_model": "gpt-4o-mini",
+    "openai_vision_model": "",           # empty = use the chat model
+    "openai_base_url": "https://api.openai.com/v1",
+    "openai_cost_ack": False,            # the user has seen the cost notice
+    # Every turn resends this many past messages. On a metered provider that
+    # window is a direct multiplier on the bill, so it is configurable.
+    "chat_history_limit": 20,
     "ollama_url": "http://127.0.0.1:11434",
     "chat_model": "llama3.2:3b",
     "vision_model": "qwen3-vl:2b-instruct",
@@ -100,6 +111,23 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     except (TypeError, ValueError):
         minutes = DEFAULTS["focus_minutes"]
     cfg["focus_minutes"] = max(1, min(240, minutes))
+
+    # --- provider --------------------------------------------------------
+    if cfg.get("llm_provider") not in ("ollama", "openai"):
+        cfg["llm_provider"] = "ollama"
+    # A paid provider cannot be switched on until the cost notice has been
+    # acknowledged. Enforcing it here means a hand-edited config.json, or a
+    # POST that skipped the UI, still cannot start spending money silently.
+    if cfg.get("llm_provider") == "openai" and not cfg.get("openai_cost_ack"):
+        cfg["llm_provider"] = "ollama"
+    base = str(cfg.get("openai_base_url") or "").strip()
+    cfg["openai_base_url"] = base if base.startswith(("http://", "https://")) \
+        else DEFAULTS["openai_base_url"]
+    try:
+        window = int(cfg.get("chat_history_limit") or DEFAULTS["chat_history_limit"])
+    except (TypeError, ValueError):
+        window = DEFAULTS["chat_history_limit"]
+    cfg["chat_history_limit"] = max(2, min(100, window))
 
 
 def update_config(patch: dict[str, Any]) -> dict[str, Any]:

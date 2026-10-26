@@ -8,7 +8,7 @@ import sys
 import time
 from typing import Any, Iterator
 
-from . import armory, config, conversations, ollama, paths, vision, voices
+from . import armory, config, conversations, llm, ollama, openai_client, paths, vision, voices
 from .app import HttpError, Request, Response, Router, sse
 
 router = Router()
@@ -36,7 +36,16 @@ def _language_instruction(lang: str) -> str:
 @router.get("/api/health")
 def health(req: Request) -> Response:
     cfg = config.get_config()
-    ollama_health = ollama.health(timeout=2.5)
+    # Only the provider actually in use is contacted. Probing a metered API
+    # every twelve seconds to colour a chip nobody is looking at would be both
+    # slow and, on a billed account, rude.
+    brain = llm.health(timeout=6.0)
+    ollama_health = (
+        ollama.health(timeout=2.5)
+        if brain["provider"] == llm.OLLAMA
+        else {"state": "disconnected", "models": [], "url": brain.get("url", ""),
+              "error": "not in use"}
+    )
     engine = voices.engine_info()
     chosen = voices.resolve_voice(
         cfg["conversation_language"], cfg.get("voice_override", ""), cfg.get("voice_by_language")
@@ -52,12 +61,18 @@ def health(req: Request) -> Response:
                 "power_state": _RUNTIME["power_state"],
                 "home": str(paths.JARVIS_HOME),
             },
+            # The active brain, whichever it is. This is what the status chip
+            # reads; "ollama" below stays for anything still expecting it.
+            "llm": brain,
             "ollama": {
                 "state": ollama_health["state"],
                 "url": ollama_health["url"],
                 "models": ollama_health["models"],
                 "chat_model": cfg["chat_model"],
-                "chat_model_installed": ollama.has_model(cfg["chat_model"]),
+                "chat_model_installed": (
+                    ollama.has_model(cfg["chat_model"])
+                    if brain["provider"] == llm.OLLAMA else False
+                ),
                 "error": ollama_health.get("error", ""),
             },
             "voice": {
@@ -93,7 +108,65 @@ def post_config(req: Request) -> Response:
     patch = req.json()
     patch.pop("mic_muted", None)      # the mic state is owned by the browser
     patch.pop("power_state", None)    # power state goes through /api/power
+    # Credentials never travel through the settings document, which is
+    # readable by the browser. They have their own endpoint below.
+    for key in ("openai_api_key", "api_key", "openai:api_key"):
+        patch.pop(key, None)
     return Response(config.update_config(patch))
+
+
+# --------------------------------------------------------------------------
+# language model provider
+# --------------------------------------------------------------------------
+
+@router.get("/api/llm/status")
+def get_llm_status(req: Request) -> Response:
+    """State of the active provider. Reports whether a key exists, never what."""
+    info = llm.health()
+    info["providers"] = list(llm.PROVIDERS)
+    info["openai_key_set"] = openai_client.has_key()
+    return Response(info)
+
+
+@router.get("/api/llm/models")
+def get_llm_models(req: Request) -> Response:
+    try:
+        return Response({"provider": llm.provider(), "models": llm.models()})
+    except Exception as exc:  # noqa: BLE001 - reported, not raised at the UI
+        return Response({"provider": llm.provider(), "models": [], "error": str(exc)[:200]})
+
+
+@router.post("/api/llm/key")
+def post_llm_key(req: Request) -> Response:
+    """
+    Store an API key on the backend.
+
+    It is written to ~/.jarvis/secrets.json with mode 600 and is never sent
+    back: the response says only whether one is now set. There is deliberately
+    no GET for this.
+    """
+    data = req.json()
+    which = (data.get("provider") or llm.OPENAI).lower()
+    if which != llm.OPENAI:
+        raise HttpError(400, "unknown provider")
+    value = data.get("key")
+    if value is None:
+        raise HttpError(400, "key required")
+    value = str(value).strip()
+    if value and len(value) < 20:
+        raise HttpError(400, "that does not look like an API key")
+    openai_client.set_key(value)
+    return Response({"provider": which, "key_set": openai_client.has_key()})
+
+
+@router.delete("/api/llm/key")
+def delete_llm_key(req: Request) -> Response:
+    openai_client.set_key("")
+    # Without a key the paid provider cannot work, so fall back rather than
+    # leaving every message failing.
+    if llm.provider() == llm.OPENAI:
+        config.update_config({"llm_provider": llm.OLLAMA})
+    return Response({"key_set": openai_client.has_key(), "provider": llm.provider()})
 
 
 @router.post("/api/power")
@@ -199,7 +272,8 @@ def post_chat(req: Request) -> Response:
         raise HttpError(400, "message required")
     lang = data.get("language") or cfg["conversation_language"]
     conv_id = data.get("conversation_id") or ""
-    model = data.get("model") or cfg["chat_model"]
+    # Whichever provider is active decides the default model.
+    model = (data.get("model") or "").strip() or llm.active_model()
 
     if conv_id:
         try:
@@ -210,25 +284,38 @@ def post_chat(req: Request) -> Response:
         conv = conversations.create(lang)
         conv_id = conv["id"]
 
-    history = [{"role": m["role"], "content": m["content"]} for m in conv["messages"][-20:]]
+    window = llm.history_limit()
+    history = [{"role": m["role"], "content": m["content"]} for m in conv["messages"][-window:]]
     system = (cfg.get("system_prompt") or "").strip() or _language_instruction(lang)
     messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": message}]
 
     conversations.append(conv_id, "user", message, language=lang)
 
     def stream() -> Iterator[bytes]:
-        yield sse("start", {"conversation_id": conv_id, "model": model, "language": lang})
+        yield sse("start", {
+            "conversation_id": conv_id,
+            "model": model,
+            "language": lang,
+            "provider": llm.provider(),
+        })
         parts: list[str] = []
         try:
-            for chunk in ollama.chat_stream(model, messages):
+            for chunk in llm.chat_stream(messages, model=model):
                 piece = chunk.get("message", {}).get("content", "")
                 if piece:
                     parts.append(piece)
                     yield sse("token", {"text": piece})
                 if chunk.get("done"):
                     break
-        except ollama.OllamaError as exc:
-            yield sse("error", {"code": "ollama_error", "detail": str(exc)[:300]})
+        except llm.LLMError as exc:
+            # The code is a stable token the interface translates; the detail
+            # is the provider's own words, which is what makes a bad key or an
+            # empty balance diagnosable from the phone.
+            yield sse("error", {
+                "code": exc.code,
+                "provider": exc.provider,
+                "detail": exc.detail[:300],
+            })
             return
         except Exception as exc:  # noqa: BLE001
             yield sse("error", {"code": "server_error", "detail": f"{type(exc).__name__}: {exc}"[:300]})

@@ -65,7 +65,8 @@ can take space from the visualiser or push a control off the screen.
 | **Active / Standby** | Standby stops mic, speech, camera, every function switch and the animation; the server and your data keep running. |
 | **Magnifier** | In the drawer: a compact horizontal wedge that scales the whole interface. |
 | **Tool Armory** | MCP connections over stdio or HTTP, with credentials kept on the backend. |
-| **Chat** | Streaming answers from Ollama, conversations saved on disk. |
+| **Chat** | Streaming answers, conversations saved on disk. |
+| **Two brains** | **Ollama** (local, free, offline — the default) or **OpenAI** (paid API). Switch in Settings → Brain. The API key lives only on the phone's backend and is never sent to the browser. OpenAI cannot be switched on until its cost notice is acknowledged. |
 | **Voice** | Offline Piper voices via sherpa-onnx, with a browser-voice fallback. |
 
 ---
@@ -76,6 +77,7 @@ can take space from the visualiser or push a control off the screen.
 server/      Python backend (standard library only)
   main.py        entry point            app.py       tiny HTTP framework
   api.py         all HTTP routes        config.py    settings + secret store
+  llm.py         provider router        openai_client.py  OpenAI (stdlib only)
   mcp_client.py  MCP JSON-RPC client    armory.py    Tool Armory
   voices.py      sherpa-onnx TTS        vision.py    EYES / local vision
   ollama.py      Ollama client          conversations.py
@@ -118,6 +120,7 @@ conversations, settings or voices.
 | Start without opening MCP connections | `./start.sh --no-autoconnect` |
 | Stop | `./stop.sh` (or Ctrl-C in the same session) |
 | Check what works | `python3 tools/selftest.py` |
+| Check the AI providers | `python3 tools/test_provider.py` (offline, costs nothing) |
 | Test without Ollama | `python3 tools/mock_ollama.py` in a second session |
 
 The server binds to `127.0.0.1` by default: nothing on your network can reach
@@ -139,6 +142,11 @@ it until you pass `--lan`.
 * Camera frames are never written to storage unless you turn that on.
 * Credentials live in `~/.jarvis/secrets.json` (chmod 600). The browser can
   set a value and is told whether one exists — it never receives the value.
+  That includes the OpenAI API key: there is deliberately no endpoint that
+  returns it, and `/api/config` rejects any attempt to carry one.
+* A paid provider cannot be switched on until its cost notice is
+  acknowledged. That rule is enforced in the backend, so a hand-edited
+  `config.json` cannot start spending money either.
 * A tool connection is shown as CONNECTED only after the MCP handshake and
   `tools/list` have both answered.
 * No model and no voice is ever downloaded without you confirming it.

@@ -700,6 +700,22 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .badge-ok { color: #a9ffe0; border-color: rgba(46, 230, 168, .45); }
 .badge-missing { color: var(--warn); border-color: rgba(255, 193, 61, .45); }
 .saved-flag { font-size: .60em; color: var(--ok); }
+
+/* The notice shown before a paid provider can be switched on. Amber rather
+   than red: this is something to understand, not something that went wrong. */
+.cost-note {
+  margin: 6px 0 2px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 193, 61, .42);
+  border-radius: 8px;
+  background: rgba(50, 36, 8, .45);
+}
+.cost-note strong {
+  display: block;
+  font-size: .62em; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--warn); margin-bottom: 4px;
+}
+.cost-note p { margin: 0; font-size: .62em; line-height: 1.45; color: var(--text-dim); }
 .diag {
   font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .56em;
   white-space: pre-wrap; word-break: break-all; color: var(--text-dim);

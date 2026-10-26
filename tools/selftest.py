@@ -50,7 +50,8 @@ def section(title):
 
 def check_modules():
     section("Backend modules")
-    for module in ("paths", "store", "config", "ollama", "mcp_client", "armory",
+    for module in ("paths", "store", "config", "ollama", "openai_client", "llm",
+                   "mcp_client", "armory",
                    "voices", "vision", "conversations", "app", "api", "main"):
         try:
             __import__(f"server.{module}")
@@ -205,6 +206,18 @@ def check_server(base):
         minutes = cfg.get("focus_minutes")
         (ok if isinstance(minutes, int) and 1 <= minutes <= 240 else bad)(
             f"focus session length is sane ({minutes})")
+        (ok if cfg.get("llm_provider") in ("ollama", "openai") else bad)(
+            f"language-model provider is valid ({cfg.get('llm_provider')})")
+        # The settings document is readable by the browser, so no credential
+        # may ever appear in it under any name.
+        blob = json.dumps(cfg).lower()
+        leaked = [k for k in ("sk-", "api_key", "apikey") if k in blob]
+        (ok if not leaked else bad)("no API key in the settings document",
+                                    ", ".join(leaked))
+        if cfg.get("llm_provider") == "openai":
+            (ok if cfg.get("openai_cost_ack") else bad)(
+                "paid provider is only active after the cost notice")
+        print(f"{DIM}        provider details: python3 tools/test_provider.py{RESET}")
     except Exception as exc:  # noqa: BLE001
         bad("config endpoint", repr(exc))
 

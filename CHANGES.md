@@ -2,6 +2,68 @@
 
 ---
 
+# V2.4 — a second brain: OpenAI alongside Ollama
+
+Ollama stays the default: local, free, offline, private. OpenAI is now
+available beside it, chosen in **Settings → Brain**.
+
+## Modular by construction
+
+* `server/openai_client.py` — the API client, standard library only, so
+  Termux still needs no `pip install` that could fail.
+* `server/llm.py` — a router over both providers. Everything above it (the
+  chat endpoint, the health report, EYES) asks the router, never a provider,
+  so a third one means writing a client and adding two lines here.
+* Both clients already yield chunks in the same shape, so there is no format
+  translation above the router.
+
+## The key never reaches the browser
+
+* It is stored in `~/.jarvis/secrets.json` (chmod 600) under a name, using
+  the same secret store the Tool Armory already uses.
+* `POST /api/llm/key` sets it. There is deliberately **no GET**: the API says
+  whether a key exists, never what it is.
+* `/api/config` strips any field that looks like a credential, so a key
+  cannot be smuggled through the settings document the browser can read.
+* `tools/test_provider.py` asserts the key is absent from the settings
+  document, the provider status and the surfaced error text.
+
+## Costs are explained before anything can be billed
+
+Settings shows an amber notice — what OpenAI charges for, that JARVIS cannot
+see your balance, that each turn resends the recent conversation so longer
+conversations cost more per reply, and a pointer to OpenAI's pricing page —
+with an acknowledgement that must be ticked first.
+
+That rule is enforced in `config.update_config()`, not only in the UI: a
+hand-edited `config.json` or a POST that skipped the interface still falls
+back to Ollama. The new `chat_history_limit` setting (default 20) makes the
+resend window adjustable, because on a metered provider it multiplies cost.
+
+## Errors say what to do
+
+Failures are mapped to stable codes and translated into all six languages:
+no key, key rejected, out of credit, rate limited, model does not exist,
+region or model not permitted, server error, timeout. The provider's own
+words are appended, which is what makes a rejected key diagnosable from a
+phone. Verified against synthetic HTTP 401/403/404/429/500 responses.
+
+## Everything else still works
+
+Romanian and the other five languages (the conversation language reaches
+OpenAI through the same system prompt), voice, conversations on disk, and
+EYES — vision routes through the provider too, so the camera works on either
+brain, and says so when a frame will be billed.
+
+The status chip now names whichever brain is active and turns amber when it
+is connected but pointed at a model that is not there. Only the provider in
+use is contacted: polling a metered API every twelve seconds to colour a chip
+would be both slow and rude.
+
+**No interface layout changed.**
+
+---
+
 # V2.3 — FACE is a real scanned head
 
 The procedural bust is gone from the default path. FACE now renders an actual
