@@ -44,13 +44,37 @@
   </header>
 
   <!-- ===================== workspace =====================
-       An empty field on the left and a narrow HUD column on the right, as in
-       the reference: the visualiser sits at the top right and every control
-       stacks directly underneath it. -->
+       One centred column holding the reference's stack, in its order:
+       avatar, focus timer, rings, status, mode, functions. The chat bar is
+       the only thing below it. -->
   <div class="workspace">
   <div class="hud-col">
 
-  <!-- ===================== visualiser ===================== -->
+  <!-- ============ 1. avatar / hologram (small screen) ============
+       Its own WebGL surface, so the face can be on screen at the same time
+       as the rings below rather than instead of them. -->
+  <section class="avatar-card" id="avatar-card">
+    <canvas id="avatar-card-gl" class="avatar-canvas" aria-hidden="true"></canvas>
+    <span class="card-tag" aria-hidden="true" data-i18n="app.title">JARVIS</span>
+  </section>
+
+  <!-- ============ 2. timer / focus (block under the avatar) ============
+       Shown only while a session runs: an idle timer would be exactly the
+       wasted space this layout is meant to remove. -->
+  <section class="focus-block" id="focus-block" hidden>
+    <button class="focus-btn" id="btn-focus-pause" type="button"
+            data-i18n-aria="fn.focusPause" data-i18n-title="fn.focusPause">❚❚</button>
+    <span class="focus-time" id="focus-time">00:00</span>
+    <button class="focus-btn" id="btn-focus-stop" type="button"
+            data-i18n-aria="fn.focusStop" data-i18n-title="fn.focusStop">✕</button>
+    <span class="focus-caption">
+      <span class="focus-dot" aria-hidden="true"></span>
+      <span data-i18n="fn.focus">Focus</span>
+      <span class="focus-drift" id="focus-drift"></span>
+    </span>
+  </section>
+
+  <!-- ===================== 3. rings visualiser ===================== -->
   <main class="stage" id="stage">
     <!-- Two canvases: a canvas can hold only one kind of context, and RINGS is
          Canvas 2D while FACE is WebGL. Only the active one is shown. -->
