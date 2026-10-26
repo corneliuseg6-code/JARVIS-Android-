@@ -122,7 +122,9 @@ def post_config(req: Request) -> Response:
 @router.get("/api/llm/status")
 def get_llm_status(req: Request) -> Response:
     """State of the active provider. Reports whether a key exists, never what."""
-    info = llm.health()
+    # The user is looking at the settings panel, so check for real rather
+    # than reusing the cached answer the status chip polls against.
+    info = llm.health(force=True)
     info["providers"] = list(llm.PROVIDERS)
     info["openai_key_set"] = openai_client.has_key()
     return Response(info)

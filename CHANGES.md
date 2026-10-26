@@ -62,6 +62,27 @@ would be both slow and rude.
 
 **No interface layout changed.**
 
+## Fixes found in the closing audit
+
+1. **The service worker cache name had not been bumped.** An already-installed
+   PWA would have kept serving the previous JavaScript, so the Brain panel
+   would simply never have appeared. This is the second time that bite has
+   drawn blood; the name now changes with every interface release.
+2. **The status chip was polling OpenAI every twelve seconds.** `/api/health`
+   calls the router, and on a metered provider that meant a request across the
+   internet, on mobile data, six times a minute to colour one chip. Provider
+   health is now held for 60 seconds, keyed by a hash of the endpoint and the
+   key so changing either invalidates it at once — without retaining any key
+   material. Opening the settings panel still checks for real.
+3. **The model fields were ambiguous.** "Chat model" and "Vision model" are
+   Ollama's, and editing them while OpenAI was active did nothing. They are
+   now named "Ollama chat model" and "Ollama vision model", under an
+   "Ollama & local" heading, in all six languages.
+
+`tools/test_provider.py` grew two checks for the polling behaviour: four
+background polls must make one request, and the settings panel must bypass
+the cache. 20 checks, still offline, still free.
+
 ---
 
 # V2.3 — FACE is a real scanned head

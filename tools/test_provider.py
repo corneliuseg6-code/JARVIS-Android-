@@ -114,6 +114,31 @@ def check_cost_guard() -> None:
         config.update_config(restore)
 
 
+def check_health_cache() -> None:
+    """The status chip polls every 12s; that must not become 12s of traffic."""
+    section("Status polling")
+    calls = {"n": 0}
+    real = oc._probe
+
+    def counting(timeout):  # noqa: ANN001
+        calls["n"] += 1
+        return {"state": "disconnected", "models": [], "url": "test", "key_set": True}
+
+    oc._probe = counting
+    try:
+        oc._HEALTH_CACHE.update(at=0.0, fingerprint="", value=None)
+        for _ in range(4):
+            oc.health(timeout=1)
+        check("four background polls make one request", calls["n"] == 1,
+              f"{calls['n']} request(s)")
+        oc.health(timeout=1, force=True)
+        check("opening the settings panel checks for real", calls["n"] == 2,
+              f"{calls['n']} request(s)")
+    finally:
+        oc._probe = real
+        oc._HEALTH_CACHE.update(at=0.0, fingerprint="", value=None)
+
+
 def check_router() -> None:
     section("Router")
     check("both providers are offered", set(llm.PROVIDERS) == {"ollama", "openai"})
@@ -127,6 +152,7 @@ def main() -> int:
     check_error_mapping()
     check_secrecy()
     check_cost_guard()
+    check_health_cache()
     check_router()
     print(f"\n{GREEN}{passed} passed{RESET}, {RED if failed else ''}{failed} failed{RESET}")
     return 1 if failed else 0

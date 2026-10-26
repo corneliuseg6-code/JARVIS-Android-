@@ -19,7 +19,10 @@ layer above never have to care which provider answered.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Iterator
@@ -128,8 +131,47 @@ def _from_http(exc: urllib.error.HTTPError) -> OpenAIError:
 # health and models
 # --------------------------------------------------------------------------
 
-def health(timeout: float = 8.0) -> dict[str, Any]:
-    """Report the real state, never a guess, and never echo the key."""
+#: The interface polls /api/health every twelve seconds. Reaching across the
+#: internet that often — on a phone, on mobile data — to colour one chip is
+#: wasteful and invites rate limiting, so the answer is held briefly. The
+#: fingerprint is a hash of the endpoint and the key, so changing either
+#: invalidates the cache immediately without ever retaining key material.
+HEALTH_TTL = 60.0
+_HEALTH_LOCK = threading.Lock()
+_HEALTH_CACHE: dict[str, Any] = {"at": 0.0, "fingerprint": "", "value": None}
+
+
+def _fingerprint() -> str:
+    raw = _base() + "\0" + (config.get_secret(SECRET_NAME) or "")
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def health(timeout: float = 8.0, *, force: bool = False) -> dict[str, Any]:
+    """
+    Report the real state, never a guess, and never echo the key.
+
+    `force` skips the cache — used when the user is explicitly looking at the
+    provider panel, as opposed to a background poll.
+    """
+    fingerprint = _fingerprint()
+    now = time.monotonic()
+    with _HEALTH_LOCK:
+        cached = _HEALTH_CACHE
+        if (
+            not force
+            and cached["value"] is not None
+            and cached["fingerprint"] == fingerprint
+            and now - cached["at"] < HEALTH_TTL
+        ):
+            return dict(cached["value"])
+
+    result = _probe(timeout)
+    with _HEALTH_LOCK:
+        _HEALTH_CACHE.update(at=time.monotonic(), fingerprint=fingerprint, value=dict(result))
+    return result
+
+
+def _probe(timeout: float) -> dict[str, Any]:
     base = _base()
     if not has_key():
         return {

@@ -68,18 +68,19 @@ def history_limit() -> int:
 # status
 # --------------------------------------------------------------------------
 
-def health(timeout: float = 6.0) -> dict[str, Any]:
+def health(timeout: float = 6.0, *, force: bool = False) -> dict[str, Any]:
     """
     The state of the provider that is actually in use.
 
     The inactive provider is not contacted: polling OpenAI every twelve
     seconds to colour a chip nobody is looking at would be both slow and, on
-    a metered account, rude.
+    a metered account, rude. Background polls also reuse a briefly cached
+    answer; `force` is for when the user is looking straight at the panel.
     """
     which = provider()
     model = active_model(which)
     if which == OPENAI:
-        info = openai_client.health(timeout=timeout)
+        info = openai_client.health(timeout=timeout, force=force)
         models = info.get("models", [])
         ready = bool(models) and model in models
         return {
