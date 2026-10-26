@@ -43,8 +43,12 @@
             data-i18n-aria="settings.title" data-i18n-title="settings.title">⚙</button>
   </header>
 
-  <!-- ============ connection status (slim, scrollable) ============ -->
-  <div class="statusbar" id="status-chips" role="status" aria-live="polite"></div>
+  <!-- ===================== workspace =====================
+       An empty field on the left and a narrow HUD column on the right, as in
+       the reference: the visualiser sits at the top right and every control
+       stacks directly underneath it. -->
+  <div class="workspace">
+  <div class="hud-col">
 
   <!-- ===================== visualiser ===================== -->
   <main class="stage" id="stage">
@@ -67,6 +71,9 @@
       </div>
     </div>
   </main>
+
+  <!-- ============ connection status (slim, scrollable) ============ -->
+  <div class="statusbar" id="status-chips" role="status" aria-live="polite"></div>
 
   <!-- ===================== HUD controls ===================== -->
   <div class="hud">
@@ -117,6 +124,9 @@
       </button>
     </div>
   </div>
+
+  </div><!-- /hud-col -->
+  </div><!-- /workspace -->
 
   <!-- ===================== chat dock ===================== -->
   <section class="dock" id="dock" data-panel="chat">

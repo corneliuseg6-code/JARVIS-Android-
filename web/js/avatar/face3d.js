@@ -138,6 +138,7 @@ uniform float uTime;
 uniform float uScanY;            // travelling band, in model space
 uniform float uEnergy;           // 0..1, from activity and voice level
 uniform float uTear;             // horizontal interference, model y
+uniform float uCamZ;             // camera distance, so depth tint tracks it
 uniform vec3 uDeep;
 uniform vec3 uBright;
 uniform float uLineMode;         // 1.0 when drawing the mesh overlay
@@ -176,7 +177,10 @@ void main() {
   float tear = exp(-pow((vModel.y - uTear) * 90.0, 2.0));
 
   // Depth tint: what is further away falls towards deep blue.
-  float depth = clamp((vEye.z + 4.6) / 2.2, 0.0, 1.0);
+  // Measured from the camera, not from a fixed number: the distance changes
+  // with the stage's shape, and a hard-coded reference leaves the bust
+  // uniformly dim as soon as the camera pulls back.
+  float depth = clamp((vEye.z + uCamZ + 1.1) / 2.2, 0.0, 1.0);
 
   vec3 colour = mix(uDeep, uBright,
     clamp(fres * 1.15 + shade * 0.55 + band * 0.45 + depth * 0.18, 0.0, 1.0));
@@ -267,6 +271,7 @@ uniform mat4 uMV;
 uniform vec2 uHinge;
 uniform float uJaw;
 uniform float uBlink;
+uniform float uCamZ;             // camera distance, so depth tint tracks it
 uniform vec2 uOffset;            // clip-space nudge: see the thickness pass
 
 varying float vBright;
@@ -289,7 +294,7 @@ void main() {
   vBright = aBright;
   vY = p.y;
   vec4 eye = uMV * vec4(p, 1.0);
-  vDepth = clamp((eye.z + 4.6) / 2.2, 0.0, 1.0);
+  vDepth = clamp((eye.z + uCamZ + 1.1) / 2.2, 0.0, 1.0);
   vec4 clip = uProj * eye;
   clip.xy += uOffset * clip.w;
   gl_Position = clip;
@@ -575,13 +580,26 @@ export default class Face3D {
     const aspect = w / Math.max(1, h);
     // Frame the bust: the head fills a portrait screen, the shoulders are
     // allowed to run off the bottom edge the way a bust shot does.
-    const distance = aspect < 1
-      ? 4.15 / Math.min(1.25, Math.max(0.55, aspect * 1.45))
-      : 5.2;
-    perspective(this._proj, 0.72, aspect, 0.1, 20);
-    // Lift the model so the frame is a bust: the crown clear of the top edge,
-    // the shoulders running off the bottom.
-    modelView(this._mv, yaw, pitch, 0, 0.22, -distance);
+    // Frame the bust by solving for it rather than by guessing a distance:
+    // fit a box tall enough for the whole head plus the top of the shoulders,
+    // and wide enough that the head never touches the sides. Whichever of the
+    // two needs more room wins, so the head cannot crop on any stage shape.
+    const FOV = 0.72;
+    const FIT_H = 3.20;                 // crown to the top of the chest
+    const FIT_W = 2.20;                 // comfortably wider than the head
+    const CENTRE_Y = -0.30;             // the middle of that box
+    // The face is not at the model origin — the nose is about a unit nearer
+    // the camera, and perspective magnifies it by roughly half again. Fitting
+    // at the origin plane therefore overshoots and crops the head, so the fit
+    // is solved at the plane the face actually occupies.
+    const Z_REF = 0.95;
+    const half = Math.tan(FOV / 2);
+    const distance = Z_REF
+      + Math.max(FIT_H / (2 * half), FIT_W / (2 * half * aspect));
+
+    perspective(this._proj, FOV, aspect, 0.1, 24);
+    modelView(this._mv, yaw, pitch, 0, -CENTRE_Y, -distance);
+    this._camZ = distance;
     mat3FromMat4(this._nor, this._mv);
 
     this._viewport = [canvas.width, canvas.height];
@@ -632,6 +650,7 @@ export default class Face3D {
     gl.uniform1f(p.u.uScanY, this.scan);
     gl.uniform1f(p.u.uTear, this.tear);
     gl.uniform1f(p.u.uEnergy, energy);
+    gl.uniform1f(p.u.uCamZ, this._camZ);
     gl.uniform3f(p.u.uDeep, 0.015, 0.150, 0.640);
     gl.uniform3f(p.u.uBright, 0.360, 0.740, 1.000);
 
@@ -775,6 +794,7 @@ export default class Face3D {
     gl.uniform1f(p.u.uTime, this.phase);
     gl.uniform1f(p.u.uScanY, this.scan);
     gl.uniform1f(p.u.uEnergy, energy);
+    gl.uniform1f(p.u.uCamZ, this._camZ);
     gl.uniform3f(p.u.uBright, 0.240, 0.660, 1.000);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, c.pos);
