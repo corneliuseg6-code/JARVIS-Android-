@@ -815,6 +815,151 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   max-height: 22dvh; overflow: auto;
 }
 
+/* ===================== FULL SCREEN ===================== */
+/* Compact enough to live in the top bar beside the activity pill, and gone
+   entirely once the screen is ours. */
+.fs-btn {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  min-height: 28px; padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: rgba(8, 24, 36, .7); color: var(--teal);
+  font-size: .50em; letter-spacing: .10em; text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+}
+.fs-btn:active { background: rgba(67, 222, 210, .18); }
+.fs-ico { font-size: 1.2em; line-height: 1; }
+
+/* The label is the first thing to go on a narrow screen; the glyph alone
+   still reads as "full screen". */
+@media (max-width: 400px) {
+  .fs-label { display: none; }
+  .fs-btn { padding: 2px 7px; }
+}
+
+.fs-exit {
+  position: fixed; z-index: 60;
+  top: calc(var(--safe-t) + 10px); left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 4px 14px;
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  background: rgba(4, 14, 24, .92); color: var(--teal-soft);
+  font-size: .62em; letter-spacing: .10em; text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .55);
+  backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.fs-exit.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+
+/* Immersive mode folds the chrome away; the exit pill is the one control that
+   must survive it, or a full-screen immersive JARVIS has no visible way back. */
+.app[data-immersive="on"] .fs-exit.is-visible { opacity: 1; pointer-events: auto; }
+
+/* ===================== AI connections ===================== */
+.conn-body { display: flex; flex-direction: column; gap: 10px; }
+.conn-empty { color: var(--text-dim); font-size: .70em; text-align: center; margin: 14px 0; }
+.conn-empty.is-bad { color: #ffc8cd; }
+
+.conn-card {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 10px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: rgba(6, 18, 30, .78);
+}
+.conn-card[data-provider="claude-code"] { border-color: rgba(141, 243, 236, .34); }
+
+.conn-head { display: flex; align-items: center; gap: 8px; }
+.conn-head h3 {
+  margin: 0; flex: 1 1 auto; min-width: 0;
+  font-size: .80em; font-weight: 700; letter-spacing: .10em; text-transform: uppercase;
+  color: #eafffd;
+}
+.conn-badge {
+  flex: none; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(5, 16, 27, .7);
+  font-size: .52em; letter-spacing: .10em; text-transform: uppercase; color: var(--text-dim);
+}
+.conn-badge[data-state="connected"] { border-color: rgba(46, 230, 168, .5); color: #a9ffe0; }
+.conn-badge[data-state="error"]     { border-color: rgba(255, 93, 108, .5); color: #ffc8cd; }
+
+.conn-row { display: flex; align-items: center; gap: 8px; }
+.conn-row > span { flex: 0 0 38%; font-size: .64em; color: var(--text-dim); }
+.conn-row input, .conn-row select {
+  flex: 1 1 auto; min-width: 0; min-height: 32px;
+  padding: 4px 9px; border-radius: 7px;
+  border: 1px solid var(--line); background: rgba(3, 12, 20, .85);
+  color: var(--text); font-size: .68em; outline: none;
+}
+.conn-row input:focus, .conn-row select:focus { border-color: var(--line-strong); }
+
+.conn-note { margin: 0; font-size: .60em; line-height: 1.45; color: var(--text-dim); }
+.conn-note.is-ok   { color: #a9ffe0; }
+.conn-note.is-warn { color: var(--warn); }
+.conn-note.is-bad  { color: #ffc8cd; }
+
+.conn-switch { display: flex; align-items: center; gap: 8px; font-size: .66em; cursor: pointer; }
+.conn-switch.is-disabled { opacity: .45; cursor: not-allowed; }
+.conn-switch input { width: 16px; height: 16px; flex: none; accent-color: var(--teal); }
+
+.conn-key { display: flex; flex-direction: column; gap: 6px; }
+.conn-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.conn-result { margin: 0; font-size: .62em; line-height: 1.45; color: var(--text-dim); }
+.conn-result.is-ok  { color: #a9ffe0; }
+.conn-result.is-bad { color: #ffc8cd; }
+
+.cost-prices { margin: 4px 0; padding-left: 16px; }
+.cost-prices li { font-size: .60em; line-height: 1.5; color: var(--text-dim); }
+
+/* --- Claude Code: the approval queue --- */
+.conn-ask { display: flex; flex-direction: column; gap: 6px; }
+.conn-ask textarea {
+  resize: vertical; min-height: 56px;
+  padding: 6px 9px; border-radius: 7px;
+  border: 1px solid var(--line); background: rgba(3, 12, 20, .85);
+  color: var(--text); font-size: .68em; outline: none; line-height: 1.4;
+}
+
+.conn-queue { display: flex; flex-direction: column; gap: 7px; }
+.conn-queue h4 {
+  margin: 4px 0 0; font-size: .62em; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--teal-soft);
+}
+
+.code-req {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(4, 14, 24, .7);
+}
+/* A request that is waiting on the user is the one thing on this panel that
+   should be impossible to scroll past. */
+.code-req[data-state="pending"] { border-color: var(--warn); box-shadow: 0 0 12px rgba(255, 193, 61, .18); }
+.code-req[data-state="running"] { border-color: rgba(111, 180, 255, .55); }
+.code-req[data-state="error"]   { border-color: rgba(255, 93, 108, .5); }
+
+.code-req-head { display: flex; align-items: center; gap: 6px; }
+.code-mode {
+  padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line);
+  font-size: .50em; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim);
+}
+.code-mode[data-mode="edit"] { border-color: var(--warn); color: var(--warn); }
+.code-state {
+  margin-left: auto; font-size: .52em; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.code-prompt { margin: 0; font-size: .66em; line-height: 1.45; }
+
+.code-cmd, .code-out {
+  margin: 0; padding: 6px 8px; border-radius: 6px;
+  background: rgba(2, 8, 14, .9); border: 1px solid var(--line);
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .54em; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 30dvh; overflow: auto; color: var(--teal-soft);
+}
+.code-out { color: var(--text); max-height: 40dvh; }
+.code-out.is-bad { color: #ffc8cd; border-color: rgba(255, 93, 108, .4); }
+
 /* ===================== immersive mode =====================
    Tap the visualiser and it takes the whole screen: everything else fades out
    and the stage is lifted out of the layout. Tap again and they come back.

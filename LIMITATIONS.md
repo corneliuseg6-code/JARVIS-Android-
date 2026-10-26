@@ -208,3 +208,67 @@ they hold.
   and microphone on other devices, because they require a secure context.
 * `window.close()` after EXIT only works if the page was opened as a PWA or by
   a script; in a normal tab the interface closes and the tab stays.
+
+---
+
+## Claude Code on Termux — the honest answer
+
+**Android is not an Anthropic-supported platform for Claude Code.** The
+documented systems are macOS 13+, Windows 10 1809+, Ubuntu 20.04+, Debian 10+
+and Alpine 3.19+. The published builds — native installer and npm alike — are
+`linux-arm64` (glibc) and `linux-arm64-musl`; Termux is Android with Bionic
+libc, so neither runs there unmodified.
+
+Community routes exist (a patched ELF loader, `glibc-runner`, or a proot
+Ubuntu chroot that gives the normal installer a real glibc userland). They are
+third-party and none of them is something this project can vouch for.
+
+What JARVIS therefore does:
+
+| Situation | What you see |
+|---|---|
+| `claude` on PATH and it runs | The card shows the real version and path, and the controls work |
+| `claude` missing | The card states that, with no switch to press |
+| `claude` present but won't execute | The card reports the actual `exec` error — the usual shape of the ABI mismatch |
+| Any Termux install | An amber note explaining that the platform is unsupported and what the community routes are |
+
+**Verified in this session:** detection against the real CLI (2.1.311 at
+`/opt/node22/bin/claude`) on Linux x86_64. The run path — argument building,
+subprocess, JSON parsing, the approval gate — is covered by
+`tools/test_connections.py` against a stub `claude`, so the whole bridge is
+exercised without a billed model call.
+
+**Not verified:** a Claude Code run on an actual Termux install on the Galaxy
+S25 Ultra. No Android device was available here, and per the above there is no
+supported way to get the binary there.
+
+## Claude (Anthropic API) — verified
+
+Unlike `api.openai.com`, which this build environment's proxy blocks,
+`api.anthropic.com` is reachable from here, so the Claude provider was tested
+against the live API:
+
+| What | How it was verified |
+|---|---|
+| Key storage | written to `~/.jarvis/secrets.json`, mode 600, absent from `/api/config`, the status payload and every error string |
+| Rejected key | a deliberately invalid key produced a real 401, mapped to `auth`, and surfaced in the interface as "Neconectat: invalid x-api-key" |
+| Cost gate | `llm_provider: "claude"` falls back to `ollama` unless the connection is enabled *and* the cost notice acknowledged — enforced in `config._clamp_v21()`, not only in the UI |
+| Error mapping | all eight documented HTTP failures map to codes the interface translates |
+| Message translation | system prompt hoisted, images as base64 blocks, consecutive same-role turns merged |
+
+**Not verified:** a successful billed completion. No valid Anthropic key was
+used, because spending money is the user's decision.
+
+## FULL SCREEN
+
+| What | How it was verified |
+|---|---|
+| Enter | `requestFullscreen({navigationUI:'hide'})` engages; `document.fullscreenElement` set |
+| Button hides in fullscreen | asserted |
+| EXIT pill | appears on entry, fades after ~3.2s, returns on any tap |
+| Exit restores | `document.fullscreenElement` cleared, button returns, layout byte-identical |
+| Immersive still works | FACE + tap-to-expand unaffected |
+| No API | with `requestFullscreen` and `fullscreenEnabled` removed, `enter()` returns false, the button hides, and a toast explains — it never claims success |
+
+**Not verified on hardware:** Android Chrome's own handling of the status bar
+and gesture bar, and the installed PWA. Chromium desktop was used here.

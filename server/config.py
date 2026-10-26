@@ -49,11 +49,27 @@ DEFAULTS: dict[str, Any] = {
     # Which brain answers. "ollama" is free, local and offline; "openai" is
     # a paid remote API. Switching to a billed provider needs an explicit
     # acknowledgement, enforced in update_config() rather than only in the UI.
-    "llm_provider": "ollama",            # "ollama" | "openai"
+    "llm_provider": "ollama",            # "ollama" | "openai" | "claude"
+    "openai_enabled": False,             # the connection may be used at all
     "openai_model": "gpt-4o-mini",
     "openai_vision_model": "",           # empty = use the chat model
     "openai_base_url": "https://api.openai.com/v1",
     "openai_cost_ack": False,            # the user has seen the cost notice
+    # --- Claude (Anthropic API) ------------------------------------------
+    "claude_enabled": False,
+    "claude_model": "claude-opus-5-5",
+    "claude_vision_model": "",           # empty = use the chat model
+    "anthropic_base_url": "https://api.anthropic.com",
+    "claude_cost_ack": False,
+    "claude_effort": "low",              # low | medium | high — billed thinking
+    # --- Claude Code (the local CLI) --------------------------------------
+    # Off by default, and useless until a working directory is chosen. Edits
+    # are a second switch on top of that; see server/claude_code.py.
+    "claude_code_enabled": False,
+    "claude_code_allow_edits": False,
+    "claude_code_workdir": "",
+    "claude_code_model": "",             # empty = whatever the CLI defaults to
+    "claude_code_max_turns": 6,
     # Every turn resends this many past messages. On a metered provider that
     # window is a direct multiplier on the bill, so it is configurable.
     "chat_history_limit": 20,
@@ -113,16 +129,39 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     cfg["focus_minutes"] = max(1, min(240, minutes))
 
     # --- provider --------------------------------------------------------
-    if cfg.get("llm_provider") not in ("ollama", "openai"):
+    if cfg.get("llm_provider") not in ("ollama", "openai", "claude"):
         cfg["llm_provider"] = "ollama"
-    # A paid provider cannot be switched on until the cost notice has been
-    # acknowledged. Enforcing it here means a hand-edited config.json, or a
-    # POST that skipped the UI, still cannot start spending money silently.
-    if cfg.get("llm_provider") == "openai" and not cfg.get("openai_cost_ack"):
+    # A paid provider cannot be selected until it has been switched on AND its
+    # cost notice acknowledged. Enforcing it here rather than only in the UI
+    # means a hand-edited config.json, or a POST that skipped the interface,
+    # still cannot start spending money. Ollama is always the fallback.
+    if cfg.get("llm_provider") == "openai" and not (
+        cfg.get("openai_enabled") and cfg.get("openai_cost_ack")
+    ):
+        cfg["llm_provider"] = "ollama"
+    if cfg.get("llm_provider") == "claude" and not (
+        cfg.get("claude_enabled") and cfg.get("claude_cost_ack")
+    ):
         cfg["llm_provider"] = "ollama"
     base = str(cfg.get("openai_base_url") or "").strip()
     cfg["openai_base_url"] = base if base.startswith(("http://", "https://")) \
         else DEFAULTS["openai_base_url"]
+    anthropic_base = str(cfg.get("anthropic_base_url") or "").strip()
+    cfg["anthropic_base_url"] = anthropic_base if anthropic_base.startswith(("http://", "https://")) \
+        else DEFAULTS["anthropic_base_url"]
+    if str(cfg.get("claude_effort") or "").lower() not in ("low", "medium", "high"):
+        cfg["claude_effort"] = DEFAULTS["claude_effort"]
+
+    # --- Claude Code ------------------------------------------------------
+    # Edits cannot be allowed on a connection that is off, and neither switch
+    # means anything without a working directory.
+    if not cfg.get("claude_code_enabled"):
+        cfg["claude_code_allow_edits"] = False
+    try:
+        turns = int(cfg.get("claude_code_max_turns") or DEFAULTS["claude_code_max_turns"])
+    except (TypeError, ValueError):
+        turns = DEFAULTS["claude_code_max_turns"]
+    cfg["claude_code_max_turns"] = max(1, min(20, turns))
     try:
         window = int(cfg.get("chat_history_limit") or DEFAULTS["chat_history_limit"])
     except (TypeError, ValueError):

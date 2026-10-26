@@ -8,7 +8,17 @@ import sys
 import time
 from typing import Any, Iterator
 
-from . import armory, config, conversations, llm, ollama, openai_client, paths, vision, voices
+from . import (
+    anthropic_client, armory, claude_code, config, conversations, llm, ollama,
+    openai_client, paths, vision, voices,
+)
+
+#: Which secret store entry belongs to which provider. Keeping the mapping in
+#: one place is what lets the key routes stay provider-agnostic.
+_KEYED_PROVIDERS = {
+    llm.OPENAI: openai_client,
+    llm.CLAUDE: anthropic_client,
+}
 from .app import HttpError, Request, Response, Router, sse
 
 router = Router()
@@ -110,7 +120,10 @@ def post_config(req: Request) -> Response:
     patch.pop("power_state", None)    # power state goes through /api/power
     # Credentials never travel through the settings document, which is
     # readable by the browser. They have their own endpoint below.
-    for key in ("openai_api_key", "api_key", "openai:api_key"):
+    for key in (
+        "openai_api_key", "api_key", "openai:api_key",
+        "anthropic_api_key", "claude_api_key", "anthropic:api_key",
+    ):
         patch.pop(key, None)
     return Response(config.update_config(patch))
 
@@ -127,7 +140,110 @@ def get_llm_status(req: Request) -> Response:
     info = llm.health(force=True)
     info["providers"] = list(llm.PROVIDERS)
     info["openai_key_set"] = openai_client.has_key()
+    info["claude_key_set"] = anthropic_client.has_key()
     return Response(info)
+
+
+@router.get("/api/llm/connections")
+def get_llm_connections(req: Request) -> Response:
+    """
+    Everything the AI Connections panel needs, in one call.
+
+    Each provider reports whether it is switched on, whether a key is stored
+    (never the key), what it costs, and — for the one in use — its live state.
+    An inactive paid provider is not contacted until the user presses Test.
+    """
+    cfg = config.get_config()
+    active = llm.provider()
+    live = llm.health(force=True)
+
+    def entry(which: str, **extra: Any) -> dict[str, Any]:
+        return {
+            "provider": which,
+            "label": llm.LABELS[which],
+            "active": which == active,
+            "billed": which in llm.BILLED,
+            "model": llm.active_model(which),
+            # Only the active provider has been probed; the others report
+            # "unknown" rather than pretending to a state nobody checked.
+            "state": live.get("state", "unknown") if which == active else "unknown",
+            "detail": live.get("detail", "") if which == active else "",
+            **extra,
+        }
+
+    return Response({
+        "active": active,
+        "connections": [
+            entry(
+                llm.OLLAMA,
+                enabled=True,
+                key_required=False,
+                key_set=True,
+                cost_ack=True,
+                url=cfg.get("ollama_url", ""),
+            ),
+            entry(
+                llm.OPENAI,
+                enabled=bool(cfg.get("openai_enabled")),
+                key_required=True,
+                key_set=openai_client.has_key(),
+                cost_ack=bool(cfg.get("openai_cost_ack")),
+                url=cfg.get("openai_base_url", ""),
+            ),
+            entry(
+                llm.CLAUDE,
+                enabled=bool(cfg.get("claude_enabled")),
+                key_required=True,
+                key_set=anthropic_client.has_key(),
+                cost_ack=bool(cfg.get("claude_cost_ack")),
+                url=cfg.get("anthropic_base_url", ""),
+                suggested_models=list(anthropic_client.SUGGESTED_MODELS),
+                pricing={m: anthropic_client.price_of(m) for m in anthropic_client.SUGGESTED_MODELS},
+                effort=cfg.get("claude_effort", "low"),
+            ),
+        ],
+        "code": claude_code.status(),
+    })
+
+
+@router.post("/api/llm/test")
+def post_llm_test(req: Request) -> Response:
+    """
+    Check one connection on demand.
+
+    This is the Test button. It probes the named provider whether or not it is
+    the active one — that is the whole point — but it never sends a chat
+    completion, so testing a paid connection costs nothing: listing models is
+    an unbilled call on both APIs.
+    """
+    which = (req.json().get("provider") or "").lower()
+    if which not in llm.PROVIDERS:
+        raise HttpError(400, "unknown provider")
+
+    if which == llm.OLLAMA:
+        info = ollama.health(timeout=4.0)
+        models = info.get("models", [])
+    else:
+        client = _KEYED_PROVIDERS[which]
+        if not client.has_key():
+            return Response({
+                "provider": which, "state": "disconnected",
+                "error": "no_key", "detail": "No API key is stored.", "models": [],
+            })
+        info = client.health(timeout=12.0, force=True)
+        models = info.get("models", [])
+
+    model = llm.active_model(which)
+    return Response({
+        "provider": which,
+        "state": info.get("state", "unknown"),
+        "error": info.get("error", ""),
+        "detail": info.get("detail", ""),
+        "models": models,
+        "model": model,
+        "model_ready": (model in models) if models else info.get("state") == "connected",
+        "billed": which in llm.BILLED,
+    })
 
 
 @router.get("/api/llm/models")
@@ -149,7 +265,8 @@ def post_llm_key(req: Request) -> Response:
     """
     data = req.json()
     which = (data.get("provider") or llm.OPENAI).lower()
-    if which != llm.OPENAI:
+    client = _KEYED_PROVIDERS.get(which)
+    if client is None:
         raise HttpError(400, "unknown provider")
     value = data.get("key")
     if value is None:
@@ -157,18 +274,79 @@ def post_llm_key(req: Request) -> Response:
     value = str(value).strip()
     if value and len(value) < 20:
         raise HttpError(400, "that does not look like an API key")
-    openai_client.set_key(value)
-    return Response({"provider": which, "key_set": openai_client.has_key()})
+    client.set_key(value)
+    return Response({"provider": which, "key_set": client.has_key()})
 
 
 @router.delete("/api/llm/key")
 def delete_llm_key(req: Request) -> Response:
-    openai_client.set_key("")
+    which = (req.q("provider", llm.OPENAI) or llm.OPENAI).lower()
+    client = _KEYED_PROVIDERS.get(which)
+    if client is None:
+        raise HttpError(400, "unknown provider")
+    client.set_key("")
     # Without a key the paid provider cannot work, so fall back rather than
     # leaving every message failing.
-    if llm.provider() == llm.OPENAI:
+    if llm.provider() == which:
         config.update_config({"llm_provider": llm.OLLAMA})
-    return Response({"key_set": openai_client.has_key(), "provider": llm.provider()})
+    return Response({"provider": which, "key_set": client.has_key(), "active": llm.provider()})
+
+
+# --------------------------------------------------------------------------
+# Claude Code — the local CLI, behind an approval gate
+# --------------------------------------------------------------------------
+
+@router.get("/api/code/status")
+def get_code_status(req: Request) -> Response:
+    """Whether there is a usable CLI here, and if not, the actual reason."""
+    return Response(claude_code.status())
+
+
+@router.get("/api/code/requests")
+def get_code_requests(req: Request) -> Response:
+    return Response({"requests": claude_code.recent()})
+
+
+@router.post("/api/code/request")
+def post_code_request(req: Request) -> Response:
+    """
+    Record a coding request. **Nothing runs here.**
+
+    The response carries the exact argument vector, so the interface shows the
+    user the real command before asking them to approve it.
+    """
+    data = req.json()
+    try:
+        record = claude_code.propose(
+            str(data.get("prompt") or ""),
+            directory=str(data.get("directory") or ""),
+            mode=str(data.get("mode") or claude_code.PLAN),
+        )
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
+    return Response(record)
+
+
+@router.post("/api/code/approve")
+def post_code_approve(req: Request) -> Response:
+    """The only route that starts a process, and only for a pending request."""
+    data = req.json()
+    try:
+        record = claude_code.approve(
+            str(data.get("id") or ""),
+            allow_edits=bool(data.get("allow_edits")),
+        )
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
+    return Response(record)
+
+
+@router.post("/api/code/cancel")
+def post_code_cancel(req: Request) -> Response:
+    try:
+        return Response(claude_code.cancel(str(req.json().get("id") or "")))
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
 
 
 @router.post("/api/power")

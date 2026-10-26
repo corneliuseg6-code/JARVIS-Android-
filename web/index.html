@@ -39,9 +39,24 @@
       <span id="activity-label" data-i18n="activity.idle">Standing by</span>
     </div>
 
+    <!-- FULL SCREEN: the browser's chrome, not JARVIS's own. Hidden while
+         full screen, and hidden entirely where the API is unavailable. -->
+    <button class="fs-btn" id="btn-fullscreen" type="button"
+            data-i18n-aria="fs.enter" data-i18n-title="fs.enter">
+      <span class="fs-ico" aria-hidden="true">⛶</span>
+      <span class="fs-label" data-i18n="fs.enterShort">Full screen</span>
+    </button>
+
     <button class="icon-btn" id="btn-open-settings" type="button"
             data-i18n-aria="settings.title" data-i18n-title="settings.title">⚙</button>
   </header>
+
+  <!-- Shown for a few seconds after a tap while full screen. -->
+  <button class="fs-exit" id="btn-fullscreen-exit" type="button" hidden
+          data-i18n-aria="fs.exit" data-i18n-title="fs.exit">
+    <span class="fs-ico" aria-hidden="true">⛶</span>
+    <span data-i18n="fs.exitShort">Exit full screen</span>
+  </button>
 
   <!-- ===================== workspace =====================
        Top band: the instrument console — the rings centred, the status rail
@@ -204,6 +219,9 @@
     <button class="menu-btn" type="button" data-view="eyes">
       <span class="menu-ico" aria-hidden="true">◉</span><span data-i18n="nav.eyes">Eyes</span>
     </button>
+    <button class="menu-btn" type="button" data-view="connections">
+      <span class="menu-ico" aria-hidden="true">∞</span><span data-i18n="nav.connections">AI Connections</span>
+    </button>
     <button class="menu-btn" type="button" data-view="settings">
       <span class="menu-ico" aria-hidden="true">⚙</span><span data-i18n="nav.settings">Settings</span>
     </button>
@@ -274,6 +292,11 @@
         </div>
         <p class="cam-note" id="cam-note"></p>
         <div class="cam-result" id="cam-result" hidden></div>
+      </div>
+
+      <!-- AI CONNECTIONS: every brain JARVIS can use, and the Claude Code CLI -->
+      <div class="panel panel-connections" data-panel="connections" hidden>
+        <div class="conn-body" id="connections-body"></div>
       </div>
 
       <div class="panel panel-settings" data-panel="settings" hidden>

@@ -2,6 +2,65 @@
 
 ---
 
+# V2.8 — AI Connections, and a full-screen button
+
+## A new AI CONNECTIONS section in the menu
+
+Three brains in one panel, in the order of what they cost you.
+
+| | Free | Key | Cost gate | Test |
+|---|---|---|---|---|
+| **Ollama** | yes, local and offline | — | — | yes |
+| **OpenAI** | no | backend only | yes | yes |
+| **Claude** | no | backend only | yes | yes |
+
+Ollama stays the default and the fallback. Neither paid provider can become
+the active brain until it is **switched on** *and* its **cost notice is
+acknowledged** — and that is enforced in `config._clamp_v21()`, so a
+hand-edited `config.json` or a POST that skipped the interface still cannot
+start spending. The notice carries the real per-million-token prices.
+
+Keys go to `~/.jarvis/secrets.json` (mode 600) on the Termux backend. There is
+no GET for them, here or anywhere: the browser is told whether a key exists,
+never what it is. `tools/test_connections.py` asserts the key is absent from
+the settings document, the status payload and every error string.
+
+`server/anthropic_client.py` is the new Claude client — the Messages API over
+`urllib`, so Termux still needs no `pip install`. The project takes no pip
+dependencies at all, which is why the official `anthropic` SDK is not used.
+
+## Claude Code — a real bridge, or an honest "no"
+
+JARVIS does not reimplement Claude Code. It looks for the `claude` binary and
+drives it headlessly, behind an approval gate:
+
+1. **Propose.** JARVIS records a request and returns the exact argument
+   vector. Nothing runs.
+2. **Review.** The panel shows that command verbatim, and the directory.
+3. **Approve.** Only then does a process start.
+
+Plan mode is the default and passes `--permission-mode plan --restricted`: it
+cannot write, run commands or deploy. Edits need a settings switch *and* a
+per-request confirmation, and run under `acceptEdits`.
+`--dangerously-skip-permissions` is never passed. Requests cannot reach
+outside the one configured working directory, and JARVIS never touches Claude
+Code's credentials — `claude` signs in on its own.
+
+**Android is not an Anthropic-supported platform for Claude Code.** Where the
+binary is missing or will not execute, the card says so with the real reason
+and offers no switch. See LIMITATIONS.md.
+
+## FULL SCREEN
+
+A compact button at the top of the interface hands the whole screen to JARVIS
+through the Fullscreen API. It hides itself once full screen; a tap anywhere
+brings back an EXIT pill for a few seconds. Where the browser has no
+Fullscreen API the button is hidden and a message explains why, rather than a
+control that silently does nothing. This is separate from immersive mode —
+they compose, and neither switches the other on.
+
+---
+
 # V2.7 — tightening the console
 
 Layout refinements only; nothing else moved.

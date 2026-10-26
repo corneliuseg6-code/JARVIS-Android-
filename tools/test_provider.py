@@ -103,8 +103,16 @@ def check_cost_guard() -> None:
         check("refused without the cost acknowledgement",
               config.get_config()["llm_provider"] == "ollama")
 
-        config.update_config({"openai_cost_ack": True, "llm_provider": "openai"})
-        check("allowed once acknowledged",
+        # Acknowledging the cost is no longer enough on its own: since AI
+        # Connections, the connection also has to be switched on.
+        config.update_config({"openai_cost_ack": True, "openai_enabled": False,
+                              "llm_provider": "openai"})
+        check("refused while the connection is switched off",
+              config.get_config()["llm_provider"] == "ollama")
+
+        config.update_config({"openai_cost_ack": True, "openai_enabled": True,
+                              "llm_provider": "openai"})
+        check("allowed once enabled and acknowledged",
               config.get_config()["llm_provider"] == "openai")
 
         config.update_config({"llm_provider": "nonsense"})
@@ -141,7 +149,8 @@ def check_health_cache() -> None:
 
 def check_router() -> None:
     section("Router")
-    check("both providers are offered", set(llm.PROVIDERS) == {"ollama", "openai"})
+    check("all three providers are offered",
+          set(llm.PROVIDERS) == {"ollama", "openai", "claude"})
     check("history window is clamped",
           2 <= llm.history_limit() <= 100, str(llm.history_limit()))
     check("a model is always resolved", bool(llm.active_model()), llm.active_model())

@@ -76,7 +76,21 @@ export const api = {
   llmModels: () => request('/api/llm/models', { timeout: 15000 }),
   llmSetKey: (key, provider = 'openai') =>
     request('/api/llm/key', { method: 'POST', body: { provider, key } }),
-  llmClearKey: () => request('/api/llm/key', { method: 'DELETE' }),
+  llmClearKey: (provider = 'openai') =>
+    request('/api/llm/key?provider=' + encodeURIComponent(provider), { method: 'DELETE' }),
+  llmConnections: () => request('/api/llm/connections', { timeout: 20000 }),
+  llmTest: (provider) =>
+    request('/api/llm/test', { method: 'POST', body: { provider }, timeout: 25000 }),
+
+  // Claude Code. Nothing runs until codeApprove() is called with the id of a
+  // request the user has seen in full.
+  codeStatus: () => request('/api/code/status', { timeout: 15000 }),
+  codeRequests: () => request('/api/code/requests'),
+  codePropose: (prompt, directory, mode) =>
+    request('/api/code/request', { method: 'POST', body: { prompt, directory, mode } }),
+  codeApprove: (id, allowEdits = false) =>
+    request('/api/code/approve', { method: 'POST', body: { id, allow_edits: allowEdits } }),
+  codeCancel: (id) => request('/api/code/cancel', { method: 'POST', body: { id } }),
 
   voices: () => request('/api/voices'),
   downloadVoice: (voice) => request('/api/voices/download', { method: 'POST', body: { voice, confirm: true } }),

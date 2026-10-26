@@ -26,6 +26,8 @@ import Status from './ui/status.js';
 import Chat from './ui/chat.js';
 import Armory from './ui/armory.js';
 import Eyes from './ui/eyes.js';
+import Connections from './ui/connections.js';
+import Fullscreen from './ui/fullscreen.js';
 import Modes from './ui/modes.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
@@ -33,10 +35,11 @@ import { toast } from './ui/toast.js';
 const app = {
   avatar: null, mic: null, voice: null, power: null, magnifier: null,
   status: null, chat: null, armory: null, eyes: null, modes: null, settings: null,
+  connections: null, fullscreen: null,
 };
 
 const root = document.getElementById('app');
-const SHEET_VIEWS = ['armory', 'eyes', 'settings'];
+const SHEET_VIEWS = ['armory', 'eyes', 'connections', 'settings'];
 
 function guard(name, fn) {
   try {
@@ -105,6 +108,10 @@ function setView(view) {
   }
   if (view === 'armory') app.armory?.refresh();
   if (view === 'settings') app.settings?.refresh();
+  if (view === 'connections') app.connections?.refresh();
+  // The connections panel polls while a Claude Code run is in flight; leaving
+  // the panel stops it rather than letting it run behind a closed sheet.
+  if (view !== 'connections') app.connections?.stop();
 
   requestAnimationFrame(() => app.avatar?.resize());
 }
@@ -210,6 +217,8 @@ function applyLanguage(code, { persist = false } = {}) {
   app.mic?.render();
   app.power?.render();
   app.armory?.render();
+  app.connections?.render();
+  app.fullscreen?.render();
   app.modes?.render();
   app.settings?.render();
   app.voice?.resetWarnings();
@@ -313,6 +322,13 @@ async function boot() {
     onActivity: setActivity,
   }));
   app.armory = guard('armory', () => new Armory());
+  app.connections = guard('connections', () => new Connections({
+    onConfigChange: (next) => {
+      state.set({ config: next });
+      app.status?.refresh();
+      app.settings?.refresh?.();
+    },
+  }));
   app.settings = guard('settings', () => new Settings({
     onLanguageChange: (code) => applyLanguage(code),
     onConfigChange: (next) => {
@@ -325,6 +341,7 @@ async function boot() {
       app.modes?.render();
     },
   }));
+  app.fullscreen = guard('fullscreen', () => new Fullscreen());
   app.magnifier = guard('magnifier', () => new Magnifier());
   app.magnifier?.setVisible(!config || config.magnifier_enabled !== false);
 
