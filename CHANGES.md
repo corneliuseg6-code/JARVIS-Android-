@@ -2,6 +2,50 @@
 
 ---
 
+# V3.2 — depth in the particle field, status in the border
+
+## Thousands of motes, with depth
+
+The field is now ~2,200 motes on a Galaxy S25 Ultra across five depth bands.
+Depth is assigned once and never changes — nothing moves toward or away from
+the viewer — and it sets three things at once: size, brightness and drift
+speed. Near motes measure 1.24px and travel at 4.47px/s; far ones 0.44px at
+1.24px/s. That difference is the parallax that makes a flat canvas read as a
+volume.
+
+They still wander: each mote has its own heading and a slow turn rate, so the
+field has no preferred direction. No streams, no falling, no forward motion.
+
+Cost is unchanged at **0.10 ms/frame** despite 2.5x the count, because the two
+farthest bands draw as squares rather than circles — under a pixel the two are
+indistinguishable and a rect is much cheaper to path — and the whole field is
+five `Path2D` fills rather than thousands of draw calls.
+
+## Never inside the conversation
+
+The backdrop is drawn inside an even-odd clip that cuts out the chat panel and
+the chat bar, so not one mote is painted under them. Verified by reading the
+canvas back: **0 lit pixels** inside the panel, 3,267 in a strip outside it.
+Clipping rather than clearing afterwards also saves the fill.
+
+The masked rectangles are cached and refreshed by a `ResizeObserver` rather
+than measured every frame — reading a layout box 120 times a second is how an
+ambient layer becomes a janky one.
+
+## The border reports what JARVIS is doing
+
+| State | Border |
+|---|---|
+| Listening, thinking, speaking | **green** |
+| Standing by, or in standby | **red** |
+
+The travelling animation is unchanged; only the colour switches. It is driven
+from `applyEdgeState()`, which reads the same two pieces of state the activity
+pill does, from the same place — so the border and the pill cannot disagree.
+Standby wins over a lingering activity.
+
+---
+
 # V3.0 — shortcuts, a clock, and ambient light
 
 This branch also carries V2.8 (AI Connections), which was built on `main`

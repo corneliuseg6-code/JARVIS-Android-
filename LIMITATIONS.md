@@ -293,3 +293,15 @@ and gesture bar, and the installed PWA. Chromium desktop was used here.
 SwiftShader, a CPU rasteriser, where the dial alone measures 15fps — so the
 absolute numbers mean nothing and only the *difference* between layers is
 informative. The 0.10 ms figure is that difference.
+
+## Particle depth and the status border — verified
+
+| What | How it was verified |
+|---|---|
+| Count | 2,218 motes at 412×915, across all five depth bands |
+| Depth | near band 1.24px at 4.47px/s against far band 0.44px at 1.24px/s — size and parallax both scale with depth |
+| No net drift | mean displacement a fraction of a pixel against ~4px travelled per mote over 1.2s |
+| Chat panel | canvas read back: 0 lit pixels inside the panel, 3,267 in a strip outside it |
+| Cost | 0.10 ms/frame against the same scene with the layer stopped, unchanged from 900 motes |
+| Border colour | red at idle, green for listening / thinking / speaking, red again in standby even with an activity still set |
+| Border animation | `animation-name: edge-run` still running in every state |

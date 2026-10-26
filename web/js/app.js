@@ -57,9 +57,26 @@ function guard(name, fn) {
 }
 
 // ---------------------------------------------------------------- activity
+/**
+ * The edge pulse reports what JARVIS is doing.
+ *
+ * Green while it is listening, thinking or speaking; red while it is standing
+ * by or in standby. It reads the same two pieces of state the activity pill
+ * does, from the same function, so the border and the pill can never tell you
+ * different things.
+ */
+function applyEdgeState() {
+  const edge = document.getElementById('edge');
+  if (!edge) return;
+  const busy = state.get('power') !== 'standby'
+    && ['listening', 'thinking', 'speaking'].includes(state.get('activity'));
+  edge.dataset.state = busy ? 'busy' : 'rest';
+}
+
 function setActivity(activity) {
   state.set({ activity });
   root?.setAttribute('data-activity', activity);
+  applyEdgeState();
   app.avatar?.setActivity(activity);
   const label = document.getElementById('activity-label');
   if (label) {
@@ -355,6 +372,9 @@ async function boot() {
   app.backdrop = guard('backdrop', () => new Backdrop(
     document.getElementById('backdrop-canvas'),
   ));
+  // The conversation is never painted into: it is a panel in its own right,
+  // and motes behind it would still show at its edges.
+  app.backdrop?.maskOut(['.chat-panel', '.dock']);
   app.backdrop?.start();
   // One watchdog for the whole screen: when the dial drops a quality level
   // because frames are slipping, the particle field sheds motes with it.
@@ -424,12 +444,13 @@ async function boot() {
   });
 
   on('power:standby', () => {
+    applyEdgeState();
     app.modes?.stopAll('standby');
     setNote('');
     setActivity('idle');
     app.status?.schedule();
   });
-  on('power:active', () => { setActivity('idle'); app.status?.refresh(); });
+  on('power:active', () => { applyEdgeState(); setActivity('idle'); app.status?.refresh(); });
   on('mic:on', () => setActivity('listening'));
   on('mic:off', () => {
     app.modes?.micWentOff();

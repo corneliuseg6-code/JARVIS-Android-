@@ -873,10 +873,17 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   fill: none;
   vector-effect: non-scaling-stroke;
 }
+/* The pulse reports what JARVIS is doing: green while it is listening,
+   thinking or speaking, red while it is standing by. The colour is driven by
+   data-state, set from the same place the activity pill is, so the two can
+   never disagree. */
 .edge-base {
-  stroke: rgba(67, 222, 210, .16);
+  stroke: rgba(67, 222, 210, .14);
   stroke-width: 1;
 }
+.edge[data-state="busy"] .edge-base { stroke: rgba(46, 230, 168, .18); }
+.edge[data-state="rest"] .edge-base { stroke: rgba(255, 93, 108, .16); }
+
 .edge-pulse {
   stroke: var(--cyan);
   stroke-width: 2;
@@ -889,6 +896,15 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 @keyframes edge-run {
   from { stroke-dashoffset: 1000; }
   to   { stroke-dashoffset: 0; }
+}
+
+.edge[data-state="busy"] .edge-pulse {
+  stroke: var(--ok);
+  filter: drop-shadow(0 0 5px rgba(46, 230, 168, .85));
+}
+.edge[data-state="rest"] .edge-pulse {
+  stroke: var(--bad);
+  filter: drop-shadow(0 0 5px rgba(255, 93, 108, .80));
 }
 /* Reduced motion keeps the frame and parks the pulse. The class is set from
    JS because #edge precedes #app and no sibling selector reaches backwards. */

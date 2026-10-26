@@ -21,9 +21,29 @@
  */
 
 /** Particles per square CSS pixel, and the bounds that keeps it sane. */
-const DENSITY = 1 / 420;
-const MIN_PARTICLES = 260;
-const MAX_PARTICLES = 1400;
+const DENSITY = 1 / 170;
+const MIN_PARTICLES = 600;
+const MAX_PARTICLES = 3000;
+
+/**
+ * Depth bands, near to far.
+ *
+ * Each mote gets a depth once and keeps it: nothing moves toward or away
+ * from the viewer. Depth sets how big it is, how bright, and how fast it
+ * drifts — near motes cross the screen visibly quicker than far ones, which
+ * is the parallax that makes a flat canvas read as a volume.
+ *
+ * The far bands are drawn as squares rather than circles. Under about a
+ * pixel the two are indistinguishable, and a rect is far cheaper to path —
+ * which is what lets the count run to thousands on a phone.
+ */
+const BANDS = [
+  { z: 0.12, alpha: 0.10, round: false },
+  { z: 0.30, alpha: 0.17, round: false },
+  { z: 0.52, alpha: 0.26, round: true },
+  { z: 0.76, alpha: 0.40, round: true },
+  { z: 1.00, alpha: 0.62, round: true },
+];
 
 export default class Backdrop {
   constructor(canvas) {
@@ -41,6 +61,12 @@ export default class Backdrop {
     this.last = 0;
     this._loop = this._loop.bind(this);
 
+    // Areas the backdrop must never paint into. The conversation is a solid
+    // panel of its own; motes drifting behind it would still show through its
+    // edges and corners, so the layer is cut out around it entirely.
+    this.masked = [];
+    this.maskRects = [];
+
     if (this.canvas) {
       this.observer = new ResizeObserver(() => this.resize());
       this.observer.observe(this.canvas.parentElement || this.canvas);
@@ -48,6 +74,30 @@ export default class Backdrop {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this._pause();
       else if (this.running) this._resume();
+    });
+  }
+
+  /**
+   * Elements the backdrop is cut out around.
+   *
+   * Their rectangles are cached and refreshed by a ResizeObserver rather than
+   * measured every frame: reading a layout box 120 times a second is how an
+   * ambient layer turns into a janky one.
+   */
+  maskOut(selectors) {
+    this.masked = selectors
+      .map((sel) => document.querySelector(sel))
+      .filter(Boolean);
+    if (this.maskObserver) this.maskObserver.disconnect();
+    this.maskObserver = new ResizeObserver(() => this._measureMasks());
+    for (const el of this.masked) this.maskObserver.observe(el);
+    this._measureMasks();
+  }
+
+  _measureMasks() {
+    this.maskRects = this.masked.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
     });
   }
 
@@ -107,6 +157,7 @@ export default class Backdrop {
     // A soft backdrop gains nothing from a 3x panel and costs real fill rate
     // on a 1440p phone.
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    this._measureMasks();
     if (w === this.w && h === this.h && dpr === this.dpr) return;
     this.w = w; this.h = h; this.dpr = dpr;
     this.canvas.width = Math.round(w * dpr);
@@ -124,17 +175,24 @@ export default class Backdrop {
     const count = this.motion ? this._count() : Math.round(this._count() * 0.5);
     this.particles = [];
     for (let i = 0; i < count; i++) {
-      // Each mote gets its own heading and a slow turn rate, which is what
-      // makes the field wander instead of drifting one way. Speeds are tiny:
-      // suspended, not swimming.
+      // Weighted towards the back, so the field has a deep haze with a few
+      // bright motes near the glass rather than an even sheet.
+      const band = Math.min(
+        BANDS.length - 1,
+        Math.floor(Math.pow(Math.random(), 0.75) * BANDS.length),
+      );
+      const z = BANDS[band].z;
       this.particles.push({
         x: Math.random() * this.w,
         y: Math.random() * this.h,
+        band,
+        // Its own heading and a slow turn rate: the field wanders rather
+        // than drifting one way. Nothing here has a preferred direction.
         dir: Math.random() * Math.PI * 2,
         turn: (Math.random() - 0.5) * 0.9,
-        speed: 1.5 + Math.random() * 5.5,       // CSS px per second
-        r: 0.4 + Math.random() * 1.25,
-        a: 0.10 + Math.random() * 0.40,
+        // Parallax: near motes move further in the same second.
+        speed: (0.8 + Math.random() * 3.2) * (0.35 + z * 1.5),
+        r: (0.35 + Math.random() * 0.75) * (0.45 + z * 1.25),
         phase: Math.random() * Math.PI * 2,
         rate: 0.5 + Math.random() * 1.1,
       });
@@ -156,6 +214,21 @@ export default class Backdrop {
     if (!ctx || !w) return;
     ctx.clearRect(0, 0, w, h);
 
+    // Everything below is drawn inside a clip that excludes the conversation,
+    // so not one mote is ever painted under it — clipping rather than
+    // clearing afterwards also saves the fill in the first place.
+    const masked = this.maskRects.length > 0;
+    if (masked) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, w, h);
+      for (const m of this.maskRects) {
+        // Wound the opposite way so even-odd takes it out of the region.
+        ctx.rect(m.x, m.y + m.h, m.w, -m.h);
+      }
+      ctx.clip('evenodd');
+    }
+
     if (this.cinematic) {
       this._nebula(ctx, w, h, time);
       this._figure(ctx, w, h);
@@ -173,6 +246,8 @@ export default class Backdrop {
       ctx.fillStyle = scrim;
       ctx.fillRect(0, 0, w, h);
     }
+
+    if (masked) ctx.restore();
   }
 
   /**
@@ -189,38 +264,41 @@ export default class Backdrop {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
 
-    // Three bands rather than one alpha per mote: still only three fills, and
-    // the field gains the depth that a single flat alpha loses.
-    const bands = [
-      { max: 0.20, alpha: 0.16, path: new Path2D() },
-      { max: 0.36, alpha: 0.32, path: new Path2D() },
-      { max: 1.00, alpha: 0.58, path: new Path2D() },
-    ];
+    // One path per depth band: five fills for thousands of motes, instead of
+    // one draw call each.
+    const paths = BANDS.map(() => new Path2D());
 
     for (const p of this.particles) {
       if (this.motion) {
         // Wander: the heading turns slowly, so the mote curves instead of
-        // travelling in a straight line. Nothing here has a preferred
-        // direction, which is the whole point.
+        // travelling in a straight line.
         p.dir += p.turn * dt;
         const step = p.speed * dt;
         p.x += Math.cos(p.dir) * step;
         p.y += Math.sin(p.dir) * step;
-        // Wrap rather than respawn, so the field never thins out at an edge.
+        // Wrap rather than respawn, so the field never thins at an edge.
         if (p.x < -2) p.x = w + 2; else if (p.x > w + 2) p.x = -2;
         if (p.y < -2) p.y = h + 2; else if (p.y > h + 2) p.y = -2;
       }
-      const twinkle = this.motion ? 0.62 + 0.38 * Math.sin(time * p.rate + p.phase) : 1;
-      const lit = p.a * twinkle;
-      const band = lit <= bands[0].max ? bands[0] : (lit <= bands[1].max ? bands[1] : bands[2]);
-      band.path.moveTo(p.x + p.r, p.y);
-      band.path.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      const path = paths[p.band];
+      if (BANDS[p.band].round) {
+        path.moveTo(p.x + p.r, p.y);
+        path.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      } else {
+        const d = p.r * 2;
+        path.rect(p.x - p.r, p.y - p.r, d, d);
+      }
     }
 
-    for (const band of bands) {
-      ctx.globalAlpha = band.alpha;
+    for (let i = 0; i < BANDS.length; i++) {
+      // The whole band breathes together rather than each mote on its own
+      // timer: the same shimmer, at a fraction of the arithmetic.
+      const breath = this.motion
+        ? 0.72 + 0.28 * Math.sin(time * (0.5 + i * 0.17) + i)
+        : 1;
+      ctx.globalAlpha = BANDS[i].alpha * breath;
       ctx.fillStyle = '#8df3ec';
-      ctx.fill(band.path);
+      ctx.fill(paths[i]);
     }
     ctx.restore();
   }
@@ -325,5 +403,6 @@ export default class Backdrop {
   dispose() {
     this.stop();
     this.observer?.disconnect();
+    this.maskObserver?.disconnect();
   }
 }
