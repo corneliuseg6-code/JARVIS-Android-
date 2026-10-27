@@ -333,3 +333,30 @@ does. The region was narrowed to one only the background occupies.
 The first left-edge probe was placed over the status rail and read its chips
 rather than the background; it was moved below the rail before the result was
 trusted.
+
+## MCP tool calling — verified
+
+| What | How it was verified |
+|---|---|
+| stdio handshake | real `initialize` + `tools/list` against `tools/fs_mcp_server.py` |
+| Catalogue | all 5 tools reach the model, namespaced per connection, server schema passed through |
+| The model is handed them | the stub recorded 5 tool definitions in the request body |
+| `list_directory` | ran for real; the card and the answer both carry the actual directory contents |
+| A mutating call | refused, approval raised, **nothing written to disk** — checked by listing the directory before and after |
+| After approval | the write ran and `notes/new.txt` existed with the right contents |
+| Approval is single-use | the second identical request was refused again |
+| Path traversal | `../../../../etc/passwd` refused by the server's root check |
+| A missing file | reported as `ERROR`, never as success |
+| A disconnected server | reported as "the tool did not run — not connected" |
+| Layout | dial 275, toggle 275, no scrolling — unchanged |
+
+**Stubbed, and why:** the language model. There is no Ollama in this
+container, so a small HTTP server answers `/api/chat` the way Ollama does with
+tools. Everything this project owns runs for real; the one part that cannot
+run locally is the only part faked. The stub reads the tool output back into
+its reply, so a check asserting the listing arrived cannot pass without it.
+
+**Not verified on hardware:** a real Ollama choosing to call a tool. Whether
+`llama3.2:3b` reliably emits `tool_calls` for a given prompt is a property of
+the model, not of this code. The wiring is proven; the model's judgement is
+not something a test here can establish.

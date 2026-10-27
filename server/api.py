@@ -10,7 +10,7 @@ from typing import Any, Iterator
 
 from . import (
     anthropic_client, armory, claude_code, config, conversations, llm, ollama,
-    openai_client, paths, vision, voices,
+    openai_client, paths, toolchat, vision, voices,
 )
 
 #: Which secret store entry belongs to which provider. Keeping the mapping in
@@ -296,6 +296,46 @@ def delete_llm_key(req: Request) -> Response:
 # Claude Code — the local CLI, behind an approval gate
 # --------------------------------------------------------------------------
 
+@router.get("/api/chat/tools")
+def get_chat_tools(req: Request) -> Response:
+    """What the model will be offered on the next turn, and why."""
+    definitions, lookup = toolchat.catalogue()
+    return Response({
+        "provider": llm.provider(),
+        "provider_supports_tools": llm.supports_tools(),
+        "count": len(definitions),
+        "writes_allowed": toolchat.writes_allowed(),
+        "tools": [
+            {
+                "name": name,
+                "tool": entry["tool"],
+                "connection_id": entry["connection_id"],
+                "writes": entry["writes"],
+            }
+            for name, entry in lookup.items()
+        ],
+        "pending": toolchat.pending(),
+    })
+
+
+@router.post("/api/chat/tools/approve")
+def post_chat_tool_approve(req: Request) -> Response:
+    """
+    Approve one pending mutating call.
+
+    The approval is bound to that exact tool and those exact arguments, and is
+    consumed the first time it is used, so it cannot be spent on a different
+    path. Ask JARVIS again and the call will go through.
+    """
+    data = req.json()
+    try:
+        if data.get("approve") is False:
+            return Response(toolchat.reject(str(data.get("id") or "")))
+        return Response(toolchat.approve(str(data.get("id") or "")))
+    except toolchat.ToolChatError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
 @router.get("/api/code/status")
 def get_code_status(req: Request) -> Response:
     """Whether there is a usable CLI here, and if not, the actual reason."""
@@ -479,14 +519,37 @@ def post_chat(req: Request) -> Response:
             "provider": llm.provider(),
         })
         parts: list[str] = []
+        # When a connected MCP server exposes tools and the active provider can
+        # take them, the turn goes through the tool loop instead of a plain
+        # stream: the model has to be handed the tools before it can ask for
+        # one. Without tools, or on a provider that cannot use them, nothing
+        # about the old path changes.
+        use_tools = llm.supports_tools() and toolchat.available()
         try:
-            for chunk in llm.chat_stream(messages, model=model):
-                piece = chunk.get("message", {}).get("content", "")
-                if piece:
-                    parts.append(piece)
-                    yield sse("token", {"text": piece})
-                if chunk.get("done"):
-                    break
+            if use_tools:
+                for event in toolchat.run(messages, model=model, conversation_id=conv_id):
+                    kind = event.pop("type")
+                    if kind == "answer":
+                        text = event.get("text", "")
+                        if text:
+                            parts.append(text)
+                            yield sse("token", {"text": text})
+                    else:
+                        # tools / tool_call / tool_result / tool_approval go to
+                        # the interface as themselves, so the user sees which
+                        # tool ran and what it returned.
+                        yield sse(kind, event)
+            else:
+                for chunk in llm.chat_stream(messages, model=model):
+                    piece = chunk.get("message", {}).get("content", "")
+                    if piece:
+                        parts.append(piece)
+                        yield sse("token", {"text": piece})
+                    if chunk.get("done"):
+                        break
+        except toolchat.ToolChatError as exc:
+            yield sse("error", {"code": "tool_error", "detail": str(exc)[:300]})
+            return
         except llm.LLMError as exc:
             # The code is a stable token the interface translates; the detail
             # is the provider's own words, which is what makes a bad key or an

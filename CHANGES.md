@@ -2,6 +2,76 @@
 
 ---
 
+# V3.5 — MCP tools the model can actually use
+
+The Armory could already connect to an MCP server, list its tools and call
+them. Nothing joined that to the conversation: `ollama.chat_stream()` never
+sent a `tools` field, so the model was never told the tools existed, and
+nothing watched its replies for a request to use one. The server connected,
+and chat could do nothing with it.
+
+## The loop
+
+`server/toolchat.py` is the join:
+
+1. gather the tools every **connected** server exposes;
+2. ask the model, handing it those tools;
+3. if it asked for one, run it through `armory.call_tool` and append the
+   result as a `tool` message;
+4. back to 2, up to six rounds.
+
+`ollama.chat_full()` is new: one non-streamed turn returning the whole
+assistant message. The loop needs `tool_calls` intact, and a streamed turn
+hands those back in pieces whose assembly differs between Ollama versions.
+
+**Nothing about the old path changed.** With no connected server, or on a
+provider that cannot take tools, chat streams exactly as before.
+
+## Never claiming a tool ran
+
+Every `tool_result` carries what `armory.call_tool` actually returned — its
+failures included. A tool that was refused, errored, or hit a disconnected
+server says so in the transcript *the model reads*, so the model cannot report
+success over a failure it was told about. The interface shows a card per call:
+blue while running, green with the elapsed time when it ran, red and "did not
+run" when it did not, with the real output underneath.
+
+## Writes wait for you
+
+Tools are classified read-only or mutating by their verb, and **an unknown
+verb counts as mutating** — a read wrongly held is an inconvenience, a write
+wrongly allowed is not. A mutating call does not run. It raises an approval
+bound to that exact tool and those exact arguments, consumed the first time it
+is used, so an approval for one path cannot be spent on another.
+
+## New: a real filesystem server
+
+`tools/fs_mcp_server.py` — "JARVIS Files", stdio, dependency-free, confined to
+one root that `..` cannot escape. Tools: `list_directory`, `read_file`,
+`get_file_info` (read-only), `write_file`, `create_directory` (mutating).
+
+```
+name:      JARVIS Files
+transport: stdio
+command:   python3 ~/jarvis-v2/tools/fs_mcp_server.py ~/projects
+```
+
+## Tested for real
+
+`tools/test_toolcall.py` — 27 checks. The MCP server, the stdio handshake,
+`tools/list`, `tools/call`, the catalogue, the parsing, the execution and the
+result fed back are all real. The *model* is stubbed, because there is no
+Ollama in a test environment — and the stub reads the tool output back, so a
+check claiming a directory listing arrived only passes if it did.
+
+Verified through the browser as well: asking for `list_directory` produced a
+green card holding the real contents of the directory, and an answer quoting
+them. Asking for `write_file` produced a red "did not run" card, an approval
+control, and **no file on disk**; after approving, the same request wrote
+`notes/new.txt` with the right contents — confirmed on the filesystem.
+
+---
+
 # V3.4 — no box behind the rings
 
 The dial sat on a soft disc of radius `R * 1.25`. The canvas's half-size is

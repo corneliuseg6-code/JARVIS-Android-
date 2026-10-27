@@ -77,6 +77,10 @@ DEFAULTS: dict[str, Any] = {
     "claude_code_workdir": "",
     "claude_code_model": "",             # empty = whatever the CLI defaults to
     "claude_code_max_turns": 6,
+    # --- MCP tools in chat ------------------------------------------------
+    # Off by default: a tool that changes something waits for the user, one
+    # call at a time. Turning this on skips that per-call approval.
+    "mcp_allow_writes": False,
     # Every turn resends this many past messages. On a metered provider that
     # window is a direct multiplier on the bill, so it is configurable.
     "chat_history_limit": 20,

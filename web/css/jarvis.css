@@ -929,6 +929,56 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
    the backdrop is behind the interface, not through it. */
 .app[data-fullscreen="on"] .console { background: transparent; }
 
+/* ===================== MCP tool cards =====================
+   One card per tool call, in the transcript beside the messages. A call that
+   did not run is coloured as such: the point is that the model's account of
+   what it did can be checked against what actually happened. */
+.tool-card {
+  align-self: stretch;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 7px 9px; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(4, 16, 26, .8);
+  font-size: .70em;
+}
+.tool-card.is-running { border-color: rgba(111, 180, 255, .5); }
+.tool-card.is-done    { border-color: rgba(46, 230, 168, .40); }
+.tool-card.is-failed  { border-color: rgba(255, 93, 108, .50); }
+
+.tool-head { display: flex; align-items: center; gap: 6px; }
+.tool-ico { flex: none; color: var(--teal); font-size: .9em; }
+.tool-name {
+  flex: 1 1 auto; min-width: 0;
+  font-size: .82em; letter-spacing: .06em; color: var(--teal-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tool-state {
+  flex: none; font-size: .72em; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.tool-card.is-running .tool-state { color: var(--busy); animation: pulse 1.1s infinite; }
+.tool-card.is-done .tool-state    { color: #a9ffe0; }
+.tool-card.is-failed .tool-state  { color: #ffc8cd; }
+
+.tool-args, .tool-out {
+  margin: 0; padding: 5px 7px; border-radius: 5px;
+  background: rgba(2, 8, 14, .85);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: .76em; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 24dvh; overflow: auto; color: var(--text-dim);
+}
+.tool-out { color: var(--text); }
+.tool-out.is-bad { color: #ffc8cd; }
+
+.tool-approve {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 5px; padding: 7px 9px; border-radius: 7px;
+  border: 1px solid var(--warn); background: rgba(40, 28, 6, .5);
+}
+.tool-approve p { margin: 0; font-size: .92em; line-height: 1.45; color: var(--warn); }
+.tool-approve-actions { display: flex; gap: 6px; }
+.tool-approved { color: #a9ffe0 !important; }
+
 /* ===================== FULL SCREEN ===================== */
 /* Compact enough to live in the top bar beside the activity pill, and gone
    entirely once the screen is ours. */

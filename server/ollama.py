@@ -65,12 +65,15 @@ def chat_stream(
     messages: list[dict[str, Any]],
     *,
     options: dict[str, Any] | None = None,
+    tools: list[dict[str, Any]] | None = None,
     timeout: float = 300.0,
 ) -> Iterator[dict[str, Any]]:
     """Yield Ollama /api/chat NDJSON chunks as dicts."""
     payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
     if options:
         payload["options"] = options
+    if tools:
+        payload["tools"] = tools
     try:
         resp = _request("/api/chat", payload, timeout=timeout)
     except urllib.error.HTTPError as exc:
@@ -96,3 +99,34 @@ def chat_once(model: str, messages: list[dict[str, Any]], *, timeout: float = 30
         if chunk.get("done"):
             break
     return "".join(parts)
+
+
+def chat_full(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    timeout: float = 300.0,
+) -> dict[str, Any]:
+    """
+    One non-streamed turn, returning the whole assistant message.
+
+    The tool loop needs the message intact — `tool_calls` and all — and a
+    streamed turn hands those back in pieces whose assembly differs between
+    Ollama versions. Asking for the complete message is both simpler and the
+    same number of round trips.
+    """
+    payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    if tools:
+        payload["tools"] = tools
+    try:
+        resp = _request("/api/chat", payload, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:400]
+        raise OllamaError(f"HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise OllamaError(str(exc.reason)) from exc
+    with resp:
+        body = json.loads(resp.read().decode("utf-8") or "{}")
+    message = body.get("message")
+    return message if isinstance(message, dict) else {"role": "assistant", "content": ""}

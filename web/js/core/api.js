@@ -92,6 +92,11 @@ export const api = {
     request('/api/code/approve', { method: 'POST', body: { id, allow_edits: allowEdits } }),
   codeCancel: (id) => request('/api/code/cancel', { method: 'POST', body: { id } }),
 
+  // MCP tools in chat.
+  chatTools: () => request('/api/chat/tools', { timeout: 15000 }),
+  chatToolApprove: (id, approve = true) =>
+    request('/api/chat/tools/approve', { method: 'POST', body: { id, approve } }),
+
   voices: () => request('/api/voices'),
   downloadVoice: (voice) => request('/api/voices/download', { method: 'POST', body: { voice, confirm: true } }),
   downloadStatus: (voice) => request('/api/voices/download/' + encodeURIComponent(voice)),
@@ -190,4 +195,10 @@ function dispatch(frame, handlers) {
   else if (event === 'token') handlers.onToken?.(data.text || '');
   else if (event === 'error') handlers.onError?.(data);
   else if (event === 'done') handlers.onDone?.(data);
+  // MCP tool activity. The interface shows these as they happen, so what the
+  // model says it did can be checked against what actually ran.
+  else if (event === 'tools') handlers.onTools?.(data);
+  else if (event === 'tool_call') handlers.onToolCall?.(data);
+  else if (event === 'tool_result') handlers.onToolResult?.(data);
+  else if (event === 'tool_approval') handlers.onToolApproval?.(data);
 }

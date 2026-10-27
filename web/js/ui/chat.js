@@ -189,6 +189,20 @@ export default class Chat {
           body.textContent = answer;
           this._follow(false);
         },
+        onToolCall: (data) => {
+          // The answer bubble is empty until the tools are done; move it to
+          // the end so the transcript reads call -> result -> answer.
+          this._toolCard(data);
+          this.messages.appendChild(bubble);
+        },
+        onToolResult: (data) => {
+          this._toolResult(data);
+          this.messages.appendChild(bubble);
+        },
+        onToolApproval: (data) => {
+          this._toolApproval(data);
+          this.messages.appendChild(bubble);
+        },
         onError: (data) => {
           bubble.classList.add('msg-error');
           body.textContent = tLLMError(data.code, data.detail);
@@ -208,6 +222,118 @@ export default class Chat {
         },
       },
     );
+  }
+
+  /**
+   * A card in the transcript for one tool call.
+   *
+   * It is created when the call starts and filled in when the result lands,
+   * so the user watches the tool run rather than being told afterwards that
+   * it did. A call that did not run says so, in its own colour.
+   */
+  _toolCard(data) {
+    if (!this.messages) return null;
+    this.messages.querySelector('.empty')?.remove();
+    const card = document.createElement('div');
+    card.className = 'tool-card is-running';
+    card.dataset.tool = data.tool || data.name;
+
+    const head = document.createElement('div');
+    head.className = 'tool-head';
+    const ico = document.createElement('span');
+    ico.className = 'tool-ico';
+    ico.setAttribute('aria-hidden', 'true');
+    ico.textContent = data.writes ? '✎' : '⬡';
+    const name = document.createElement('span');
+    name.className = 'tool-name';
+    name.textContent = data.tool || data.name;
+    const state = document.createElement('span');
+    state.className = 'tool-state';
+    state.textContent = t('tool.running');
+    head.append(ico, name, state);
+    card.append(head);
+
+    const args = data.arguments && Object.keys(data.arguments).length
+      ? JSON.stringify(data.arguments)
+      : '';
+    if (args) {
+      const pre = document.createElement('div');
+      pre.className = 'tool-args';
+      pre.textContent = args.slice(0, 300);
+      card.appendChild(pre);
+    }
+
+    this.messages.appendChild(card);
+    this._follow(true);
+    return card;
+  }
+
+  _toolResult(data) {
+    // Match the newest running card for this tool; fall back to a fresh one
+    // so a result can never arrive with nowhere to show.
+    const cards = [...this.messages.querySelectorAll('.tool-card.is-running')];
+    const card = cards.reverse().find((c) => c.dataset.tool === (data.tool || data.name))
+      || this._toolCard(data);
+    if (!card) return;
+    card.classList.remove('is-running');
+    card.classList.add(data.ran ? 'is-done' : 'is-failed');
+    const state = card.querySelector('.tool-state');
+    if (state) {
+      state.textContent = data.ran
+        ? t('tool.ran', { ms: data.ms ?? 0 })
+        : t('tool.didNotRun');
+    }
+    const out = document.createElement('pre');
+    out.className = 'tool-out' + (data.ran ? '' : ' is-bad');
+    out.textContent = (data.text || '').slice(0, 2000);
+    card.appendChild(out);
+    this._follow(false);
+  }
+
+  /** A mutating call: nothing has happened yet, and the user decides. */
+  _toolApproval(data) {
+    const card = [...this.messages.querySelectorAll('.tool-card')].pop();
+    const box = document.createElement('div');
+    box.className = 'tool-approve';
+
+    const note = document.createElement('p');
+    note.textContent = t('tool.approveNote', { tool: data.tool });
+    box.appendChild(note);
+
+    const row = document.createElement('div');
+    row.className = 'tool-approve-actions';
+    const yes = document.createElement('button');
+    yes.type = 'button';
+    yes.className = 'btn btn-primary btn-sm';
+    yes.dataset.act = 'approve';
+    yes.textContent = t('tool.approve');
+    yes.addEventListener('click', async () => {
+      yes.disabled = true;
+      try {
+        await api.chatToolApprove(data.pending.id, true);
+        box.replaceChildren();
+        const ok = document.createElement('p');
+        ok.className = 'tool-approved';
+        ok.textContent = t('tool.approved');
+        box.appendChild(ok);
+      } catch (err) {
+        yes.disabled = false;
+        toast(err?.message || t('error.network'), 'error');
+      }
+    });
+    const no = document.createElement('button');
+    no.type = 'button';
+    no.className = 'btn btn-ghost btn-sm';
+    no.dataset.act = 'reject';
+    no.textContent = t('tool.reject');
+    no.addEventListener('click', async () => {
+      try { await api.chatToolApprove(data.pending.id, false); } catch { /* gone already */ }
+      box.remove();
+    });
+    row.append(yes, no);
+    box.appendChild(row);
+    (card || this.messages).appendChild(box);
+    this._follow(true);
   }
 
   _addReplay(bubble, text, language) {

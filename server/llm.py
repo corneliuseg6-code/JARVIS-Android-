@@ -180,6 +180,37 @@ def chat_stream(
         raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
 
 
+def chat_once_full(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    timeout: float = 300.0,
+) -> dict[str, Any]:
+    """
+    One non-streamed turn, returning the whole assistant message.
+
+    This is what the tool loop uses: it needs `tool_calls` intact, which a
+    streamed turn delivers in pieces. Only Ollama is wired for tools so far —
+    the paid providers fall back to a plain turn, so a tool-capable
+    conversation degrades to an ordinary one rather than failing.
+    """
+    which = provider()
+    chosen = (model or "").strip() or active_model(which)
+    try:
+        if which == OLLAMA:
+            return ollama.chat_full(chosen, messages, tools=tools, timeout=timeout)
+        text = chat_once(messages, model=chosen, timeout=timeout)
+        return {"role": "assistant", "content": text}
+    except ollama.OllamaError as exc:
+        raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
+
+
+def supports_tools() -> bool:
+    """Whether the active provider can be handed MCP tools."""
+    return provider() == OLLAMA
+
+
 def chat_once(
     messages: list[dict[str, Any]],
     *,
