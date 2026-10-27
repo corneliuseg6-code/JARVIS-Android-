@@ -320,7 +320,9 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   width: var(--dial);
   height: var(--dial);
   border-radius: var(--radius);
-  background: radial-gradient(62% 58% at 50% 46%, rgba(16, 70, 86, .28), transparent 72%);
+  /* No backing layer: the dial sits straight on the interface background, so
+     the rings blend into it instead of floating on a panel. */
+  background: none;
   overflow: hidden;
   touch-action: none;           /* HOLO drags the projection, not the page */
 }

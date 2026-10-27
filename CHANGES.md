@@ -2,6 +2,34 @@
 
 ---
 
+# V3.4 — no box behind the rings
+
+The dial sat on a soft disc of radius `R * 1.25`. The canvas's half-size is
+`R * 1.087`, so that disc was **wider than the canvas it was drawn into** and
+got clipped by the square edge: visible along the four sides, absent at the
+corners, which is exactly the shape of a box. On a phone's OLED, in the dark,
+a two-level step along a straight edge is plainly a rectangle.
+
+`.stage` carried a second backing layer of its own — a radial gradient behind
+the canvas. It was not being clipped, but it was still a panel the rings were
+floating on rather than part of the interface.
+
+Both are gone. The rings now sit straight on the interface background, so the
+ambient particle field runs right through where the box used to be.
+
+**The ring design is untouched.** All eight layers are exactly as they were —
+tick crown, segment ring, graduation ring, orbit, sweep, dashed ring, the two
+3D gyro rings, and the reactive core with its centre label. The core's own
+glow stays, which is what keeps the middle of the dial holographic; what went
+was only the wash *behind* the whole thing.
+
+**Verified by pixel sampling.** Strips crossing the stage's left and bottom
+edges, with the motes and the dial frozen so nothing else could vary, read
+flat across the boundary: maximum step between neighbouring pixels is **1**,
+which is the page's own gradient. Before, the boundary was a visible step.
+
+---
+
 # V3.3 — one background for both visualisers
 
 FACE used to paint its own background: a full-canvas volumetric wash behind

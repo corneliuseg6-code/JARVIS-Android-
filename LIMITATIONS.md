@@ -319,3 +319,17 @@ The first comparison attempt failed on a region that included the stage's
 top-right corner, where the hologram card and the control rail overlap it —
 those differ between frames because they animate, not because the background
 does. The region was narrowed to one only the background occupies.
+
+## The box behind the rings — verified gone
+
+| What | How it was verified |
+|---|---|
+| Stage backing layer | computed `background-image` is `none` |
+| Left edge | strip crossing it, clear of the status rail, reads flat — max step 1 |
+| Bottom edge | strip crossing it reads flat — max step 1 |
+| The dial still draws | 1,693 lit samples in the rings canvas after the change |
+| RINGS/FACE still match | the shared-background comparison still passes |
+
+The first left-edge probe was placed over the status rail and read its chips
+rather than the background; it was moved below the rail before the result was
+trusted.
