@@ -58,7 +58,8 @@ def health(req: Request) -> Response:
     )
     engine = voices.engine_info()
     chosen = voices.resolve_voice(
-        cfg["conversation_language"], cfg.get("voice_override", ""), cfg.get("voice_by_language")
+        cfg["conversation_language"], cfg.get("voice_override", ""),
+        cfg.get("voice_by_language"), cfg.get("voice_gender_by_language"),
     )
     connections = armory.list_connections()
     return Response(
@@ -411,8 +412,19 @@ def get_voices(req: Request) -> Response:
             "catalog": voices.catalog(),
             "installed": voices.installed_voices(),
             "selected": voices.resolve_voice(
-                cfg["conversation_language"], cfg.get("voice_override", ""), cfg.get("voice_by_language")
+                cfg["conversation_language"], cfg.get("voice_override", ""),
+                cfg.get("voice_by_language"), cfg.get("voice_gender_by_language"),
             ),
+            # Per language: every voice offered (catalogued or simply present)
+            # and which genders can actually be spoken right now.
+            "by_language": {
+                lang: {
+                    "voices": voices.voices_for(lang),
+                    "genders": voices.genders_for(lang),
+                }
+                for lang in config.SUPPORTED_UI_LANGUAGES
+            },
+            "diagnostics": voices.diagnostics(),
         }
     )
 
@@ -441,11 +453,29 @@ def post_tts(req: Request) -> Response:
     data = req.json()
     text = (data.get("text") or "").strip()
     lang = data.get("language") or cfg["conversation_language"]
-    chosen = voices.resolve_voice(lang, cfg.get("voice_override", ""), cfg.get("voice_by_language"))
+    # A preview asks for one specific voice; ordinary speech follows the
+    # language's settings. Either way nothing is substituted.
+    wanted = (data.get("voice") or "").strip()
+    if wanted:
+        chosen = voices.resolve_voice(lang, wanted)
+    else:
+        chosen = voices.resolve_voice(
+            lang, cfg.get("voice_override", ""), cfg.get("voice_by_language"),
+            cfg.get("voice_gender_by_language"),
+        )
+    if chosen["reason"] == "gender_unavailable":
+        raise HttpError(409, "voice_gender_unavailable:" + ",".join(
+            chosen.get("available_genders") or []))
     if not chosen["installed"]:
         raise HttpError(409, f"voice_unavailable:{chosen['voice'] or lang}")
+    # A preview can carry the slider's value so the rate can be heard before
+    # it is saved; otherwise the saved setting applies.
     try:
-        wav = voices.synthesize(text, chosen["voice"], float(cfg.get("tts_speed") or 1.0))
+        speed = float(data.get("speed") or cfg.get("tts_speed") or 1.0)
+    except (TypeError, ValueError):
+        speed = 1.0
+    try:
+        wav = voices.synthesize(text, chosen["voice"], speed)
     except Exception as exc:  # noqa: BLE001
         raise HttpError(503, f"tts_failed:{exc}") from exc
     return Response(wav, content_type="audio/wav")

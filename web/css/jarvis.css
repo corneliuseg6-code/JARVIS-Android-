@@ -802,6 +802,18 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .voice-row:last-child { border-bottom: 0; }
 .voice-lang { font-size: .64em; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); width: 2.4em; flex: none; }
 .voice-row select { flex: 1 1 110px; min-width: 0; }
+/* Male/female is a short choice; the voice name needs the room. */
+.voice-row .voice-gender { flex: 0 1 84px; }
+.voice-row .voice-pick { flex: 2 1 130px; }
+/* "only male available offline" belongs under the row, not squeezed into it. */
+.voice-only { flex: 1 1 100%; font-size: .56em; }
+
+.voice-diag { margin-top: 8px; }
+.voice-diag summary {
+  font-size: .62em; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-dim); cursor: pointer;
+}
+.voice-diag .hint { font-size: .56em; line-height: 1.5; word-break: break-all; }
 .badge { font-size: .54em; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-dim); white-space: nowrap; }
 .badge-ok { color: #a9ffe0; border-color: rgba(46, 230, 168, .45); }
 .badge-missing { color: var(--warn); border-color: rgba(255, 193, 61, .45); }

@@ -102,6 +102,12 @@ export const api = {
   downloadStatus: (voice) => request('/api/voices/download/' + encodeURIComponent(voice)),
   tts: (text, language) =>
     request('/api/tts', { method: 'POST', body: { text, language }, raw: true, timeout: 60000 }),
+  // A preview names the voice and rate outright, so what is heard is what is
+  // about to be saved rather than whatever is configured now.
+  ttsPreview: (text, language, voice, speed) =>
+    request('/api/tts', {
+      method: 'POST', body: { text, language, voice, speed }, raw: true, timeout: 60000,
+    }),
 
   conversations: () => request('/api/conversations'),
   conversation: (id) => request('/api/conversations/' + encodeURIComponent(id)),

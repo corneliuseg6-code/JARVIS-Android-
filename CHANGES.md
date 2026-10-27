@@ -2,6 +2,121 @@
 
 ---
 
+# V4 Phase 1b — the voice system
+
+Four symptoms were reported. They had three causes, and the most important
+one explains the strangest symptom.
+
+## Why JARVIS spoke in a female voice that could not be changed
+
+The only installed Romanian voice is **Mihai, who is male**. So the female
+voice being heard was never JARVIS's — it was Android's own.
+
+`voice.js` used to call `_browserFallback()` automatically whenever backend
+speech failed, and said nothing when it worked. Android then picked its own
+Romanian voice, which on a Galaxy is female. No setting could change it,
+because no setting in JARVIS controlled it.
+
+The device voice is now **off by default** (`tts_browser_fallback`), and when
+it is switched on and used, a notice names the voice and says it is the
+device's, not JARVIS's. A backend failure is now explained in the words the
+backend used — *"no voice of that gender is installed for this language;
+available: male"* — instead of a flat "voice unavailable".
+
+## Why Mihai and Alan showed as "Not installed"
+
+The scan looked only at the **top level** of the voices folder and insisted on
+exactly `<id>.onnx` + `<id>.onnx.json`. Three realistic layouts were therefore
+invisible, which was verified by planting each one on disk:
+
+| On disk | Before | Now |
+|---|---|---|
+| `ro_RO-mihai-medium.onnx` (flat) | found | found |
+| `en/en_GB/alan/medium/en_GB-alan-medium.onnx` (as HuggingFace delivers it) | **invisible** | found |
+| config named `<id>.json` instead of `<id>.onnx.json` | **invisible** | found |
+| `.ONNX` from a manual copy | **invisible** | found |
+
+The nested form is exactly what a HuggingFace download produces, which is why
+Alan in particular went missing. The scan is now recursive, accepts either
+config name, and is case-insensitive on the extension. A voice found anywhere
+under the folder is used from where it actually is.
+
+There is also a new **"Voices on this device"** section in Settings listing
+the search folder, every voice found with its real path and size, and any
+model skipped for a missing config. A voice reported missing that is in fact
+installed cannot be diagnosed from a phone without that.
+
+## Why the engine showed "—"
+
+`settings.refresh()` set `this.voices = null` on *any* failed request, and the
+engine line then rendered a bare dash. One slow request was enough to make a
+working install look absent — the "sometimes" in the report. The last good
+reading is now kept, the dash is gone, and the line always says something
+real: the engine and version, or why it could not be checked, or that the
+reading is stale.
+
+## Male / Female
+
+Every catalogue entry already carried a `gender`; nothing exposed it. There is
+now a gender selector per language, and it **only offers genders that are
+actually installed**. Where a language has just one, it says so — *"only male
+available offline"* for Romanian — rather than offering a choice that cannot
+be honoured. Asking for a gender with no installed voice returns
+`gender_unavailable` and names what is available; it is never answered with
+the other gender.
+
+A voice kept from an older install is recognised by its speaker name, so a
+legacy `en_US-alan-medium` is still Alan and still male, and selectable.
+
+**Romanian is male-only offline.** Piper publishes no female Romanian voice
+that this project has verified, and the Piper index is unreachable from the
+build machine, so none was added — a download button that 404s would be worse
+than an honest message.
+
+## Preview, and a slower slider
+
+Each installed voice has a **Preview** button that speaks a sample in that
+voice at the rate currently on the slider, before it is saved. If it fails it
+says which voice failed and why, and does not fall back to another.
+
+The speed slider was 0.6–1.6 in steps of 0.1. It is now **0.4–1.6 in steps of
+0.05**, with the value shown (`0.45×`) and marked *slow* at the bottom end.
+The backend floor moved from 0.5 to 0.3 so the slider's range is real rather
+than clamped away.
+
+## Verified
+
+`python3 tools/test_voices.py` — 53 checks, no models or sherpa-onnx needed:
+all four on-disk layouts, a model with no config rejected *and reported*, path
+traversal refused, gender resolution including the Romanian refusal, legacy
+id recognition, clamping of bad speeds and genders, and settings surviving a
+cache drop.
+
+In the running app (Playwright, 412×915), with Mihai planted flat, Alan
+planted **nested** and Amy flat:
+
+- Romanian row: `Any / Male`, no female option, *"only male available
+  offline"*, Mihai listed and marked installed;
+- English row: `Any / Male / Female`, **Alan listed** despite being nested;
+- preview buttons on both installed rows;
+- slider reports `min 0.4, step 0.05`, readout `1.00×`;
+- engine line reads *"sherpa-onnx: not importable: No module named
+  'sherpa_onnx' · Install with: pip install sherpa-onnx==1.13.8"* — correct
+  for this container and actionable;
+- choosing Female for English and 0.45× speed **survived a page reload**;
+- V3 interface untouched: dial 275 px, RINGS/FACE bar matching, clock
+  running, four shortcuts, no page scroll.
+
+**Not verified: audio actually coming out.** There is no sherpa-onnx and no
+63 MB voice model on the build machine, so no sound was produced here —
+every voice in the tests is a few zero bytes named like a model, which tests
+detection and refusal but not synthesis. The preview button, the 0.4× rate
+and Mihai's and Alan's real voices have to be heard on the phone. What the
+tests do guarantee is that if synthesis fails there, JARVIS will say so
+rather than quietly speaking in Android's voice.
+
+---
+
 # V4 Phase 1 — speed
 
 The complaint was that local answers appear very slowly. Three causes were

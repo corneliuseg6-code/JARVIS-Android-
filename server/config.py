@@ -51,8 +51,17 @@ DEFAULTS: dict[str, Any] = {
         "es": "",
         "it": "",
     },
+    # Male or female per language, when both are installed. Empty means
+    # "whichever is configured or found" — the behaviour before this existed.
+    "voice_gender_by_language": {
+        "ro": "", "en": "", "fr": "", "de": "", "es": "", "it": "",
+    },
     "voice_override": "",            # manual pick; empty = follow language
     "tts_speed": 1.0,
+    # Whether a failed JARVIS voice may be replaced by the device's own
+    # (Android's Web Speech voice). Off: a silent substitution is how JARVIS
+    # ended up speaking in a voice the user never chose and could not change.
+    "tts_browser_fallback": False,
     # --- models ----------------------------------------------------------
     # Which brain answers. "ollama" is free, local and offline; "openai" is
     # a paid remote API. Switching to a billed provider needs an explicit
@@ -162,6 +171,23 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     except (TypeError, ValueError):
         minutes = DEFAULTS["focus_minutes"]
     cfg["focus_minutes"] = max(1, min(240, minutes))
+
+    # Speech rate. The floor is deliberately low: 0.6 was not slow enough to
+    # follow a long answer in a second language.
+    try:
+        speed = float(cfg.get("tts_speed") or DEFAULTS["tts_speed"])
+    except (TypeError, ValueError):
+        speed = DEFAULTS["tts_speed"]
+    cfg["tts_speed"] = round(max(0.3, min(2.0, speed)), 2)
+
+    # Only a gender this project knows how to honour, so a typo cannot leave
+    # a language mute.
+    genders = dict(cfg.get("voice_gender_by_language") or {})
+    cfg["voice_gender_by_language"] = {
+        lang: (str(value or "").strip().lower() if str(value or "").strip().lower()
+               in ("male", "female") else "")
+        for lang, value in genders.items()
+    }
 
     # --- provider --------------------------------------------------------
     if cfg.get("llm_provider") not in ("ollama", "openai", "claude"):
