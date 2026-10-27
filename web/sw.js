@@ -7,7 +7,7 @@
    cache first, so an already-installed PWA would keep serving the old shell
    until a new cache name makes install() re-fetch it and activate() delete the
    previous one. */
-const CACHE = 'jarvis-v3-5-mcp-tools';
+const CACHE = 'jarvis-v3-6-web-research';
 const SHELL = [
   '/',
   '/index.html',

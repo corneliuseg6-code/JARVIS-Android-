@@ -577,7 +577,11 @@ def post_chat(req: Request) -> Response:
 
 @router.get("/api/armory")
 def get_armory(req: Request) -> Response:
-    return Response({"connections": armory.list_connections(), "tools": armory.all_tools()})
+    return Response({
+        "connections": armory.list_connections(),
+        "tools": armory.all_tools(),
+        "presets": armory.bundled_presets(),
+    })
 
 
 @router.post("/api/armory")

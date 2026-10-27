@@ -76,6 +76,8 @@ export default {
   "armory.transportStdio": "Local process (stdio)",
   "armory.transportHttp": "HTTP endpoint",
   "armory.command": "Command",
+  "armory.presets": "Bundled servers",
+  "armory.presetsHint": "Tap one to fill in the form.",
   "armory.commandHint": "e.g. npx -y @modelcontextprotocol/server-filesystem /sdcard",
   "armory.cwd": "Working directory",
   "armory.url": "URL",

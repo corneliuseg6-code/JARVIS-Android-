@@ -76,6 +76,8 @@ export default {
   "armory.transportStdio": "Proces local (stdio)",
   "armory.transportHttp": "Adresă HTTP",
   "armory.command": "Comandă",
+  "armory.presets": "Servere incluse",
+  "armory.presetsHint": "Atinge unul pentru a completa formularul.",
   "armory.commandHint": "ex. npx -y @modelcontextprotocol/server-filesystem /sdcard",
   "armory.cwd": "Director de lucru",
   "armory.url": "URL",

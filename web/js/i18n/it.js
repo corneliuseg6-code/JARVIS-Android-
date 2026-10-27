@@ -76,6 +76,8 @@ export default {
   "armory.transportStdio": "Processo locale (stdio)",
   "armory.transportHttp": "Endpoint HTTP",
   "armory.command": "Comando",
+  "armory.presets": "Server inclusi",
+  "armory.presetsHint": "Tocca uno per compilare il modulo.",
   "armory.commandHint": "es. npx -y @modelcontextprotocol/server-filesystem /sdcard",
   "armory.cwd": "Directory di lavoro",
   "armory.url": "URL",

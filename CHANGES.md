@@ -2,6 +2,104 @@
 
 ---
 
+# V3.6 — internet research
+
+JARVIS can now search the web, read public pages and answer with the links it
+took the answer from. It rides the tool loop added in V3.5, so there is no
+second code path: the research tools are an MCP server like any other.
+
+## `tools/web_mcp_server.py` — "JARVIS Web"
+
+Stdio MCP, stdlib only, four tools:
+
+| tool | what it does | approval |
+|---|---|---|
+| `web_search` | DuckDuckGo (or your own SearXNG), returns title + URL + snippet | no |
+| `wikipedia` | article extracts with their URLs | no |
+| `fetch_url` | reads one public page as text | no |
+| `download_file` | saves a file to `~/jarvis-downloads` | **yes** |
+
+Add it in **Tool Armory → Add → JARVIS Web**. The preset fills in the command
+with your real install path, so there is nothing to type.
+
+To use your own search instance instead of DuckDuckGo, set
+`JARVIS_SEARXNG_URL=https://your-instance` before starting JARVIS.
+
+## The address guard
+
+This is the part worth reading. The model chooses the URL, so `fetch_url` is a
+confused deputy waiting to happen — "read `http://127.0.0.1:8787/api/config`"
+would hand it your own settings, and `http://192.168.1.1/` would reach your
+router. So every hostname is resolved, and **every address it resolves to** is
+checked before the socket is opened:
+
+- loopback, private, link-local (where cloud metadata lives), multicast,
+  reserved, unspecified and carrier-grade NAT ranges are all refused;
+- `http` and `https` only — no `file://`, no `ftp://`;
+- redirects are followed by hand, up to five hops, and **each hop is checked
+  again**, because a public host is free to redirect to `127.0.0.1`;
+- a response is capped at 2 MB and the extracted text at 20 000 characters.
+
+A refusal says which address it was and why. Verified: asking it to read
+JARVIS's own API over loopback is refused, as is a public page that redirects
+into a private network.
+
+## Sources in the answer
+
+A model handed a search tool will cheerfully answer from memory and cite
+nothing. When the catalogue contains a tool that can reach the web,
+`toolchat` appends an instruction to the system message: search rather than
+recall for anything that may have changed, and list the URLs under
+`Sources:`. With no web tool connected, nothing is added.
+
+## Read-only, honestly decided
+
+`web_search` reads, but "web" is not a read verb, so the V3.5 name heuristic
+would have held it behind an approval prompt forever. Tool names now carry the
+MCP spec's `annotations`, and `toolchat.is_mutating()` consults them — but not
+blindly, because the spec is explicit that annotations may not describe a tool
+faithfully:
+
+- a write verb anywhere in the name wins over any annotation, so a server
+  claiming `delete_everything` is `readOnlyHint: true` is not believed;
+- `destructiveHint` or `readOnlyHint: false` always means approval;
+- `readOnlyHint: true` is taken only when the name itself says nothing either
+  way — which is exactly the `web_search` case.
+
+## A failed call no longer reads as a success
+
+An MCP server that answers with `isError` used to produce a green "ran in
+240ms" card with the error message inside it. Network failures are routine for
+a web tool, so `execute()` now reports `ran: false` for those, and the card
+shows them as not-run.
+
+## What was *not* verified here
+
+The live search engines are unreachable from the machine this was built on —
+its egress proxy answers 403 to `CONNECT` for `html.duckduckgo.com`,
+`lite.duckduckgo.com`, `api.duckduckgo.com`, `en.wikipedia.org` and the
+SearXNG instance tried. So **no live search was run**.
+
+What *was* run: `tools/test_websearch.py` (88 checks) against a local fixture
+serving the exact shapes DuckDuckGo, SearXNG and the Wikipedia API return —
+result parsing, redirect unwrapping, HTML-to-text, size caps, the address
+guard unpatched, redirect re-checking, filename sanitising and a real file
+written to disk. Plus the real stdio handshake, and the browser suite driving
+the Armory UI: preset → save → connect → catalogue → loopback refusal.
+
+The first live search is therefore yours to make. On the phone:
+
+```
+JARVIS → Tool Armory → Add → JARVIS Web → Save → Connect
+then ask: "search the web for the current Ollama release and give me the link"
+```
+
+If DuckDuckGo changes its HTML, `web_search` returns "No results" rather than
+wrong ones, and `_DDG_LINK` / `_DDG_SNIPPET` in `tools/web_mcp_server.py` are
+the two lines to adjust.
+
+---
+
 # V3.5 — MCP tools the model can actually use
 
 The Armory could already connect to an MCP server, list its tools and call

@@ -360,3 +360,36 @@ its reply, so a check asserting the listing arrived cannot pass without it.
 `llama3.2:3b` reliably emits `tool_calls` for a given prompt is a property of
 the model, not of this code. The wiring is proven; the model's judgement is
 not something a test here can establish.
+
+## Web research — verified, and not
+
+Run `python3 tools/test_websearch.py` (88 checks).
+
+| What | How it was verified |
+|---|---|
+| stdio handshake | real `initialize` + `tools/list` against `tools/web_mcp_server.py`; 4 tools, annotations intact |
+| Search parsing | DuckDuckGo HTML, SearXNG JSON and Wikipedia API fixtures; redirect wrapper unwrapped, snippets paired to their links, `javascript:` links dropped, `limit` honoured |
+| Page reading | title and prose extracted; `<script>`, `<style>`, `<nav>` and `<footer>` contents dropped; `&nbsp;` read as a space; 2 MB and `max_chars` caps enforced |
+| Redirects | followed, and the **final** URL reported rather than the one asked for |
+| The address guard | tested **unpatched** against loopback, `localhost`, `[::1]`, 10/172.16/192.168, 169.254, 100.64, 0.0.0.0, `file://`, `ftp://` |
+| Redirect re-checking | a page redirecting to `http://10.0.0.1/` is refused at the second hop |
+| Through the running app | the Armory UI: preset → save → **real connect** → catalogue; `fetch_url` on `http://127.0.0.1:8787/api/config` refused as loopback |
+| Approval gating | `web_search` / `wikipedia` / `fetch_url` read-only; `download_file` gated — read off the live `/api/chat/tools` catalogue |
+| A lying annotation | `readOnlyHint: true` on `delete_everything`, `write_file`, `run_shell` is ignored; all three still need approval |
+| Downloads | a real file written to disk; `../../escape.sh` stayed inside the folder; shell characters stripped from the name |
+| A failed call | an `isError` result reports `ran: false`, not a green "ran in Nms" card |
+| Layout | dial still 275px, RINGS/FACE bar still matches it, page still does not scroll |
+
+**Not verified: any live search or fetch.** The build machine's egress proxy
+answers 403 to `CONNECT` for `html.duckduckgo.com`, `lite.duckduckgo.com`,
+`api.duckduckgo.com`, `en.wikipedia.org` and the SearXNG instance tried, so
+every network call went to a local fixture. The fixture returns the documented
+shapes, not a recording of a live response — if DuckDuckGo's markup has
+changed since, `web_search` will return "No results" rather than wrong ones,
+and `_DDG_LINK` / `_DDG_SNIPPET` are the two lines to adjust.
+
+The address guard could not be tested against the fixture and the real guard
+at once: the fixture can only live on loopback, which is what the guard
+exists to refuse. So the guard is tested unpatched against literal addresses,
+and the fetching and parsing are tested with loopback temporarily permitted.
+Both halves are covered; neither patch can hide the other.

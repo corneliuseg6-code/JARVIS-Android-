@@ -56,6 +56,17 @@ READ_ONLY_HINTS = (
 #: …except these, which read like reads but are not.
 MUTATING_OVERRIDES = ("get_and_delete", "read_and_clear", "search_replace")
 
+#: Verbs that unambiguously change something. A server claiming one of these
+#: is read-only is not believed — see is_mutating.
+WRITE_VERBS = (
+    "write", "create", "delete", "remove", "update", "set", "put", "post",
+    "patch", "move", "rename", "copy", "append", "insert", "edit", "save",
+    "upload", "download", "install", "uninstall", "exec", "execute", "run",
+    "shell", "command", "send", "publish", "deploy", "push", "commit",
+    "merge", "kill", "stop", "start", "restart", "drop", "truncate", "clear",
+    "reset", "revoke", "grant", "pay", "purchase", "order", "book",
+)
+
 
 class ToolChatError(RuntimeError):
     pass
@@ -99,20 +110,78 @@ def catalogue() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         lookup[exposed] = {
             "connection_id": conn_id,
             "tool": real,
-            "writes": is_mutating(real),
+            "writes": is_mutating(real, tool.get("annotations")),
         }
     return definitions, lookup
 
 
-def is_mutating(tool_name: str) -> bool:
-    """Does this tool change something? Unknown verbs count as yes."""
+def is_mutating(tool_name: str, annotations: dict[str, Any] | None = None) -> bool:
+    """
+    Does this tool change something? Unknown verbs count as yes.
+
+    The name is read first, because it is the one thing we can judge for
+    ourselves. A server's behaviour hints are only consulted for names the
+    verb list cannot place — ``web_search`` reads, but "web" is not a verb, so
+    without the hint it would sit behind an approval prompt forever.
+
+    The hints are deliberately not trusted both ways. ``readOnlyHint: true``
+    on a tool called ``delete_everything`` is ignored: the MCP spec says
+    annotations are hints and may not describe a tool faithfully, so a
+    compromised or sloppy server must not be able to talk its way past the
+    approval gate. Hints are believed when they say a tool writes, and only
+    believed that it reads when the name gives us nothing either way.
+    """
     name = (tool_name or "").strip().lower()
     if not name:
         return True
     if any(bad in name for bad in MUTATING_OVERRIDES):
         return True
-    head = re.split(r"[_\-/.]", name)[0]
-    return head not in READ_ONLY_HINTS
+
+    hints = annotations if isinstance(annotations, dict) else {}
+    if hints.get("destructiveHint") is True or hints.get("readOnlyHint") is False:
+        return True
+
+    parts = re.split(r"[_\-/.]", name)
+    head = parts[0]
+    if any(part in WRITE_VERBS for part in parts):
+        return True              # a write verb anywhere wins over any hint
+    if head in READ_ONLY_HINTS:
+        return False
+    if hints.get("readOnlyHint") is True:
+        return False             # the name told us nothing; take the server's word
+    return True
+
+
+#: Appended to the system message whenever the catalogue holds a tool that can
+#: reach the web. A model handed a search tool will happily answer from memory
+#: and then cite nothing; being asked for the URL is what turns a tool result
+#: into something the user can check.
+RESEARCH_GUIDANCE = (
+    "\n\nYou can reach the live web through your tools. Search or read a page "
+    "whenever the answer depends on current facts — news, prices, versions, "
+    "dates, anything that may have changed — rather than answering from "
+    "memory. When you use a result, name the page you took it from and give "
+    "its full URL in your answer, one per line at the end under 'Sources:'. "
+    "If a search returns nothing useful, say so instead of filling the gap."
+)
+
+#: Names that mean a tool can reach the web.
+_WEB_MARKERS = ("search", "fetch_url", "wikipedia", "browse", "http_get", "crawl")
+
+
+def _with_guidance(
+    messages: list[dict[str, Any]], definitions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add the sourcing instruction when the model has a way to reach the web."""
+    names = " ".join(d["function"]["name"].lower() for d in definitions)
+    if not any(marker in names for marker in _WEB_MARKERS):
+        return messages
+    for index, message in enumerate(messages):
+        if message.get("role") == "system":
+            patched = dict(message)
+            patched["content"] = str(message.get("content") or "") + RESEARCH_GUIDANCE
+            return [*messages[:index], patched, *messages[index + 1:]]
+    return [{"role": "system", "content": RESEARCH_GUIDANCE.strip()}, *messages]
 
 
 # --------------------------------------------------------------------------
@@ -273,10 +342,19 @@ def execute(entry: dict[str, Any], arguments: dict[str, Any], *, conversation_id
             "ms": elapsed,
             "text": f"ERROR: the tool did not run — {outcome.get('error', 'unknown error')}",
         }
+    result = outcome.get("result")
+    text = _as_text(result)
+
+    # The call reached the server, but the server says the operation failed —
+    # a refused URL, a 404, a search that returned nothing. That is not a
+    # success, and a card that says "ran in 240ms" over an error message
+    # invites the model and the user to believe something happened.
+    failed = isinstance(result, dict) and bool(result.get("isError"))
     return {
-        "ran": True,
+        "ran": not failed,
         "ms": elapsed,
-        "text": _as_text(outcome.get("result")),
+        "text": text,
+        **({"error": text[:300]} if failed else {}),
     }
 
 
@@ -328,7 +406,7 @@ def run(
     if not definitions:
         raise ToolChatError("no connected MCP server exposes any tools")
 
-    work = list(messages)
+    work = _with_guidance(list(messages), definitions)
     yield {"type": "tools", "count": len(definitions),
            "names": [d["function"]["name"] for d in definitions]}
 
