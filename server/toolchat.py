@@ -411,13 +411,29 @@ def run(
            "names": [d["function"]["name"] for d in definitions]}
 
     for round_no in range(1, MAX_ROUNDS + 1):
-        reply = llm.chat_once_full(work, model=model, tools=definitions, timeout=timeout)
+        # Streamed, so the answer appears as it is written. Tokens are passed
+        # straight through; the assembled message at the end is what the loop
+        # reasons about. Before this, the loop asked for the whole message at
+        # once and the user watched a blank screen for the entire generation.
+        reply: dict[str, Any] = {}
+        streamed = False
+        for event in llm.chat_stream_full(work, model=model, tools=definitions,
+                                          timeout=timeout):
+            if event["type"] == "token":
+                streamed = True
+                yield {"type": "token", "text": event["text"]}
+            else:
+                reply = event["message"]
+
         calls = _parse_calls(reply)
         content = (reply.get("content") or "").strip()
 
         if not calls:
-            # The model answered in words: that is the end of the loop.
-            yield {"type": "answer", "text": content, "rounds": round_no - 1}
+            # The model answered in words: that is the end of the loop. The
+            # text has already been sent token by token, so say so rather than
+            # repeating it — `streamed` tells the caller not to send it twice.
+            yield {"type": "answer", "text": content, "rounds": round_no - 1,
+                   "streamed": streamed}
             return
 
         # Keep the assistant's own turn in the transcript, or the tool

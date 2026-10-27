@@ -507,7 +507,12 @@ def post_chat(req: Request) -> Response:
     window = llm.history_limit()
     history = [{"role": m["role"], "content": m["content"]} for m in conv["messages"][-window:]]
     system = (cfg.get("system_prompt") or "").strip() or _language_instruction(lang)
-    messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": message}]
+    # Two brakes on the window: a message count, and a character budget that
+    # can see the difference between twenty short turns and twenty long ones.
+    messages = llm.trim_history(
+        [{"role": "system", "content": system}, *history,
+         {"role": "user", "content": message}]
+    )
 
     conversations.append(conv_id, "user", message, language=lang)
 
@@ -519,6 +524,8 @@ def post_chat(req: Request) -> Response:
             "provider": llm.provider(),
         })
         parts: list[str] = []
+        started = time.time()
+        first_token: float | None = None
         # When a connected MCP server exposes tools and the active provider can
         # take them, the turn goes through the tool loop instead of a plain
         # stream: the model has to be handed the tools before it can ask for
@@ -529,10 +536,21 @@ def post_chat(req: Request) -> Response:
             if use_tools:
                 for event in toolchat.run(messages, model=model, conversation_id=conv_id):
                     kind = event.pop("type")
-                    if kind == "answer":
+                    if kind == "token":
+                        piece = event.get("text", "")
+                        if piece:
+                            parts.append(piece)
+                            if first_token is None:
+                                first_token = time.time() - started
+                            yield sse("token", {"text": piece})
+                    elif kind == "answer":
                         text = event.get("text", "")
-                        if text:
+                        # Already streamed token by token; sending it again
+                        # would duplicate the whole answer in the transcript.
+                        if text and not event.get("streamed"):
                             parts.append(text)
+                            if first_token is None:
+                                first_token = time.time() - started
                             yield sse("token", {"text": text})
                     else:
                         # tools / tool_call / tool_result / tool_approval go to
@@ -544,6 +562,8 @@ def post_chat(req: Request) -> Response:
                     piece = chunk.get("message", {}).get("content", "")
                     if piece:
                         parts.append(piece)
+                        if first_token is None:
+                            first_token = time.time() - started
                         yield sse("token", {"text": piece})
                     if chunk.get("done"):
                         break
@@ -566,7 +586,16 @@ def post_chat(req: Request) -> Response:
         text = "".join(parts).strip()
         if text:
             conversations.append(conv_id, "assistant", text, language=lang)
-        yield sse("done", {"conversation_id": conv_id, "text": text})
+        # The timings go to the interface so a slow turn can be told apart
+        # from a slow model: a large ms_first_token with a small ms_total
+        # means the model was thinking, the other way round means JARVIS was.
+        yield sse("done", {
+            "conversation_id": conv_id,
+            "text": text,
+            "ms_first_token": int(first_token * 1000) if first_token is not None else None,
+            "ms_total": int((time.time() - started) * 1000),
+            "chars": len(text),
+        })
 
     return Response(stream=stream(), content_type="text/event-stream; charset=utf-8")
 

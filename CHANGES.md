@@ -2,6 +2,84 @@
 
 ---
 
+# V4 Phase 1 — speed
+
+The complaint was that local answers appear very slowly. Three causes were
+found in the code, not guessed at, and the first one is most of it.
+
+## The tool loop did not stream at all
+
+`toolchat.run()` called `llm.chat_once_full()`, which is non-streaming,
+because the loop needs `tool_calls` intact and a streamed turn delivers them
+in pieces. So with **any** MCP server connected, the whole answer was withheld
+until generation finished. That is why chat got dramatically slower the moment
+a tool server was added — the thing the user noticed.
+
+`ollama.chat_stream_full()` now does both: it yields tokens as they arrive and
+assembles the complete message, tool calls included, from the same stream.
+
+Measured with `tools/bench_chat.py`, against a stub that emits tokens on a
+fixed schedule (300 ms to first token, 8 ms per token, 60 tokens — so the
+floor is ttft 0.300 s):
+
+| | ttft before | ttft after | token events before | after |
+|---|---|---|---|---|
+| plain chat | 0.344 s | 0.332 s | 60 | 60 |
+| **with an MCP server connected** | **0.820 s** | **0.346 s** | **1** | **60** |
+
+0.820 s was the entire generation time: one lump, at the end. The harness's
+own share is now 33–46 ms on both paths. On a phone where a 3B model generates
+for twenty seconds, this is the difference between a blank screen for twenty
+seconds and the first words inside a second.
+
+## The model was being unloaded between messages
+
+No `keep_alive` was ever sent, so Ollama unloads after about five minutes idle
+and the next message pays a multi-gigabyte reload before its first token. Now
+sent on every request, default `30m`, configurable.
+
+## No request tuning, and a window that could not see length
+
+`num_ctx` and `num_predict` are now settable (0 and -1 mean "leave it alone",
+so nothing changes until the user opts in), and history has a second brake:
+`chat_char_budget`, default 6000 characters. A message count cannot tell
+twenty short turns from twenty long ones, and the model re-reads all of it
+every turn.
+
+## Timings, visible
+
+Each answer now carries a quiet line underneath: *first word 0.4s · 3.2s
+total*. Two numbers because they mean different things — a long time to the
+first word with a quick finish is the model loading or thinking, the reverse
+would be JARVIS getting in the way.
+
+## Transcript ordering
+
+Because text now streams during tool rounds, a turn can produce several runs
+of text around a tool card. Each run is its own bubble, in the order things
+happened, instead of text being moved around a card that arrived after it.
+
+## Not a cause
+
+Voice was checked and left alone: speech already starts when the text is
+complete, which is correct for a single TTS request.
+
+## What was measured, and what was not
+
+There is no Ollama on the build machine, so the *model's* generation speed
+could not be measured and the table above is JARVIS's own overhead against a
+constant-rate stub. That is the number these changes move. Real end-to-end
+timings have to come from the phone — which is what the per-answer readout is
+for.
+
+Verified in the running app (Playwright, 412×915): the answer text grows in
+9 observable steps with first paint at 215 ms, the timing line appears,
+`list_directory` still runs for real and its output still reaches the answer,
+and the V3 interface is untouched — dial 275 px, RINGS/FACE bar matching,
+clock running, all four shortcuts present, no page scroll.
+
+---
+
 # V3.6 — internet research
 
 JARVIS can now search the web, read public pages and answer with the links it

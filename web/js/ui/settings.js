@@ -330,7 +330,57 @@ export default class Settings {
     windowField.appendChild(windowHint);
     group.appendChild(windowField);
 
+    group.appendChild(this._numberField({
+      label: t('settings.charBudget'), hint: t('settings.charBudgetHint'),
+      value: cfg.chat_char_budget ?? 6000, min: 500, max: 200000, step: 500,
+      key: 'chat_char_budget',
+    }));
+
+    // Ollama's own speed knobs. They do nothing on the paid providers, so
+    // they sit together and say which model they apply to.
+    group.appendChild(this._numberField({
+      label: t('settings.numCtx'), hint: t('settings.numCtxHint'),
+      value: cfg.ollama_num_ctx ?? 0, min: 0, max: 131072, step: 512,
+      key: 'ollama_num_ctx',
+    }));
+    group.appendChild(this._numberField({
+      label: t('settings.numPredict'), hint: t('settings.numPredictHint'),
+      value: cfg.ollama_num_predict ?? -1, min: -1, max: 8192, step: 64,
+      key: 'ollama_num_predict',
+    }));
+
+    const keep = document.createElement('input');
+    keep.type = 'text';
+    keep.value = cfg.ollama_keep_alive || '30m';
+    keep.addEventListener('change', () =>
+      this._save({ ollama_keep_alive: keep.value.trim() }));
+    const keepField = this._field(t('settings.keepAlive'), keep);
+    const keepHint = document.createElement('span');
+    keepHint.className = 'hint';
+    keepHint.textContent = t('settings.keepAliveHint');
+    keepField.appendChild(keepHint);
+    group.appendChild(keepField);
+
     return group;
+  }
+
+  /** A numeric setting with its explanation underneath. */
+  _numberField({ label, hint, value, min, max, step, key }) {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    input.addEventListener('change', () => this._save({ [key]: Number(input.value) }));
+    const field = this._field(label, input);
+    if (hint) {
+      const note = document.createElement('span');
+      note.className = 'hint';
+      note.textContent = hint;
+      field.appendChild(note);
+    }
+    return field;
   }
 
   _voiceGroup(cfg) {

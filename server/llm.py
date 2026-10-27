@@ -156,6 +156,67 @@ def models(timeout: float = 8.0) -> list[str]:
 # chat
 # --------------------------------------------------------------------------
 
+def ollama_runtime() -> tuple[dict[str, Any], str]:
+    """
+    (options, keep_alive) for an Ollama request, from the user's settings.
+
+    Only values the user actually set are sent. An unset `num_ctx` is left to
+    Ollama's own default rather than guessed at, because raising it costs
+    memory and memory is the scarce thing on a phone.
+    """
+    cfg = config.get_config()
+    options: dict[str, Any] = {}
+    try:
+        ctx = int(cfg.get("ollama_num_ctx") or 0)
+    except (TypeError, ValueError):
+        ctx = 0
+    if ctx > 0:
+        options["num_ctx"] = ctx
+    try:
+        predict = int(cfg.get("ollama_num_predict"))
+    except (TypeError, ValueError):
+        predict = -1
+    if predict > 0:
+        options["num_predict"] = predict
+    keep_alive = str(cfg.get("ollama_keep_alive") or "30m").strip()
+    return options, keep_alive
+
+
+def trim_history(
+    messages: list[dict[str, Any]], *, budget: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Drop the oldest turns until the conversation fits a character budget.
+
+    `history_limit` counts messages, which cannot tell twenty short turns
+    from twenty long ones; the model re-reads all of it every turn either
+    way. The system message and the newest turn are always kept — without
+    them there is nothing to answer.
+    """
+    if budget is None:
+        try:
+            budget = int(config.get_config().get("chat_char_budget") or 6000)
+        except (TypeError, ValueError):
+            budget = 6000
+    budget = max(500, budget)
+
+    head = [m for m in messages[:1] if m.get("role") == "system"]
+    rest = messages[len(head):]
+    if not rest:
+        return list(messages)
+
+    kept: list[dict[str, Any]] = []
+    used = sum(len(str(m.get("content") or "")) for m in head)
+    for message in reversed(rest):
+        size = len(str(message.get("content") or ""))
+        if kept and used + size > budget:
+            break
+        kept.append(message)
+        used += size
+    kept.reverse()
+    return [*head, *kept]
+
+
 def chat_stream(
     messages: list[dict[str, Any]],
     *,
@@ -171,7 +232,9 @@ def chat_stream(
         elif which == CLAUDE:
             yield from anthropic_client.chat_stream(chosen, messages, timeout=timeout)
         else:
-            yield from ollama.chat_stream(chosen, messages, timeout=timeout)
+            options, keep_alive = ollama_runtime()
+            yield from ollama.chat_stream(chosen, messages, options=options,
+                                          keep_alive=keep_alive, timeout=timeout)
     except openai_client.OpenAIError as exc:
         raise LLMError(exc.code, exc.detail, OPENAI) from exc
     except anthropic_client.AnthropicError as exc:
@@ -199,9 +262,51 @@ def chat_once_full(
     chosen = (model or "").strip() or active_model(which)
     try:
         if which == OLLAMA:
-            return ollama.chat_full(chosen, messages, tools=tools, timeout=timeout)
+            options, keep_alive = ollama_runtime()
+            return ollama.chat_full(chosen, messages, options=options, tools=tools,
+                                    keep_alive=keep_alive, timeout=timeout)
         text = chat_once(messages, model=chosen, timeout=timeout)
         return {"role": "assistant", "content": text}
+    except ollama.OllamaError as exc:
+        raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
+
+
+def chat_stream_full(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    timeout: float = 300.0,
+) -> Iterator[dict[str, Any]]:
+    """
+    Stream a turn while still assembling the complete message.
+
+    This is what the tool loop uses now. Yields ``{"type": "token"}`` events
+    as text arrives and one final ``{"type": "message"}`` carrying the whole
+    turn with its `tool_calls`, so the loop loses nothing by streaming.
+
+    A provider that cannot be handed tools streams plain text and reports a
+    message with no tool calls, which the loop reads as "it answered".
+    """
+    which = provider()
+    chosen = (model or "").strip() or active_model(which)
+    try:
+        if which == OLLAMA:
+            options, keep_alive = ollama_runtime()
+            yield from ollama.chat_stream_full(
+                chosen, messages, options=options, tools=tools,
+                keep_alive=keep_alive, timeout=timeout)
+            return
+        parts: list[str] = []
+        for chunk in chat_stream(messages, model=chosen, timeout=timeout):
+            piece = chunk.get("message", {}).get("content", "")
+            if piece:
+                parts.append(piece)
+                yield {"type": "token", "text": piece}
+            if chunk.get("done"):
+                break
+        yield {"type": "message",
+               "message": {"role": "assistant", "content": "".join(parts)}}
     except ollama.OllamaError as exc:
         raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
 

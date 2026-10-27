@@ -5,6 +5,7 @@ secrets.json -> API keys / tokens. Readable only by the backend, chmod 0600,
                 and exposed to the frontend solely as the boolean "is set".
 """
 
+import re
 import threading
 from typing import Any
 
@@ -84,6 +85,20 @@ DEFAULTS: dict[str, Any] = {
     # Every turn resends this many past messages. On a metered provider that
     # window is a direct multiplier on the bill, so it is configurable.
     "chat_history_limit": 20,
+    # A second brake on the window, in characters. A phone model re-reads the
+    # whole window every turn, and twenty long messages cost far more than
+    # twenty short ones, which a message count cannot see.
+    "chat_char_budget": 6000,
+    # How long Ollama should keep the model in memory between messages.
+    # Ollama's own default is five minutes, after which the next message pays
+    # a multi-gigabyte reload before its first token.
+    "ollama_keep_alive": "30m",
+    # 0 means "don't send it", leaving Ollama's own default. Raising num_ctx
+    # costs memory, which on a phone is the scarce thing, so it is opt-in.
+    "ollama_num_ctx": 0,
+    # -1 means no limit. A positive value caps answer length, which bounds
+    # the worst case on a slow device at the price of cutting long answers.
+    "ollama_num_predict": -1,
     "ollama_url": "http://127.0.0.1:11434",
     "chat_model": "llama3.2:3b",
     "vision_model": "qwen3-vl:2b-instruct",
@@ -187,6 +202,27 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     except (TypeError, ValueError):
         window = DEFAULTS["chat_history_limit"]
     cfg["chat_history_limit"] = max(2, min(100, window))
+    try:
+        budget = int(cfg.get("chat_char_budget") or DEFAULTS["chat_char_budget"])
+    except (TypeError, ValueError):
+        budget = DEFAULTS["chat_char_budget"]
+    cfg["chat_char_budget"] = max(500, min(200_000, budget))
+    try:
+        ctx = int(cfg.get("ollama_num_ctx") or 0)
+    except (TypeError, ValueError):
+        ctx = 0
+    cfg["ollama_num_ctx"] = 0 if ctx <= 0 else max(512, min(131_072, ctx))
+    try:
+        predict = int(cfg.get("ollama_num_predict"))
+    except (TypeError, ValueError):
+        predict = DEFAULTS["ollama_num_predict"]
+    cfg["ollama_num_predict"] = -1 if predict < 0 else max(16, min(8192, predict))
+    keep = str(cfg.get("ollama_keep_alive") or "").strip()
+    # Ollama takes a duration string ("30m", "1h") or a number of seconds.
+    # Anything else would be rejected at request time, far from here.
+    if not re.fullmatch(r"-?\d+(\.\d+)?(ms|s|m|h)?", keep):
+        keep = DEFAULTS["ollama_keep_alive"]
+    cfg["ollama_keep_alive"] = keep
 
 
 def update_config(patch: dict[str, Any]) -> dict[str, Any]:

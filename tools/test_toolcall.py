@@ -27,6 +27,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -61,17 +62,55 @@ class StubOllama(BaseHTTPRequestHandler):
     """Answers /api/tags and /api/chat the way Ollama does, with tools."""
 
     seen_tools: list = []
+    seen_stream: list = []
+    #: Set per request; a GET (/api/tags) never streams.
+    _streaming = False
+    #: Pause between streamed chunks, so a test can watch text arrive.
+    chunk_gap = 0.0
+    seen_keep_alive: list = []
 
     def log_message(self, *_args):  # quiet
         pass
 
     def _json(self, payload):
-        body = json.dumps(payload).encode()
+        """
+        Answer as Ollama does for the request that was made.
+
+        A streamed request gets NDJSON, one word per chunk, because that is
+        the shape the real server sends and the shape the tool loop now has
+        to assemble `tool_calls` out of. Answering a streamed request with a
+        single JSON object would let a broken assembler pass.
+        """
+        if not self._streaming:
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        message = payload.get("message") or {}
+        chunks = []
+        if message.get("tool_calls"):
+            chunks.append({"message": {"role": "assistant", "content": "",
+                                       "tool_calls": message["tool_calls"]},
+                           "done": False})
+        for word in (message.get("content") or "").split(" "):
+            if word:
+                chunks.append({"message": {"role": "assistant", "content": word + " "},
+                               "done": False})
+        chunks.append({"message": {"role": "assistant", "content": ""},
+                       "done": True, "done_reason": "stop"})
+
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Type", "application/x-ndjson")
         self.end_headers()
-        self.wfile.write(body)
+        for index, chunk in enumerate(chunks):
+            if StubOllama.chunk_gap and index:
+                time.sleep(StubOllama.chunk_gap)
+            self.wfile.write((json.dumps(chunk) + "\n").encode())
+            self.wfile.flush()
 
     def do_GET(self):
         if self.path == "/api/tags":
@@ -83,6 +122,9 @@ class StubOllama(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         req = json.loads(self.rfile.read(length) or "{}")
         StubOllama.seen_tools = req.get("tools") or []
+        StubOllama.seen_stream.append(bool(req.get("stream")))
+        StubOllama.seen_keep_alive.append(req.get("keep_alive"))
+        self._streaming = bool(req.get("stream"))
         messages = req.get("messages") or []
         last = messages[-1] if messages else {}
 
@@ -100,7 +142,14 @@ class StubOllama(BaseHTTPRequestHandler):
         names = [t["function"]["name"] for t in StubOllama.seen_tools]
         wanted = next((n for n in names if n.split("__")[-1] in text), None)
         if wanted is None:
-            self._json({"message": {"role": "assistant", "content": "No tool for that."}})
+            # Long enough that a streamed answer is visibly progressive: a
+            # four-word reply cannot tell streaming from one lump.
+            self._json({"message": {"role": "assistant", "content": (
+                "No tool fits that question, so here is what I know already. "
+                "Mars is the fourth planet from the Sun and the second "
+                "smallest in the solar system, with a thin atmosphere of "
+                "carbon dioxide and two small moons, Phobos and Deimos."
+            )}})
             return
         args = {"path": "."} if "list_directory" in wanted else {
             "path": "notes/new.txt", "content": "hello",
@@ -247,6 +296,16 @@ def main() -> int:
         check("a disconnected server cannot be 'used'",
               outcome["ran"] is False and "not connected" in outcome["text"],
               outcome["text"][:60])
+
+        section("The tool loop streams")
+        # Every request the loop made must have asked for a stream: the whole
+        # point of V4 Phase 1 is that the answer appears as it is written.
+        check("every request to the model was streamed",
+              bool(StubOllama.seen_stream) and all(StubOllama.seen_stream),
+              f"{StubOllama.seen_stream.count(True)}/{len(StubOllama.seen_stream)} streamed")
+        check("keep_alive is sent, so the model is not unloaded between turns",
+              all(k for k in StubOllama.seen_keep_alive),
+              f"saw {sorted(set(map(str, StubOllama.seen_keep_alive)))}")
 
     finally:
         stub.shutdown()

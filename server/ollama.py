@@ -66,6 +66,7 @@ def chat_stream(
     *,
     options: dict[str, Any] | None = None,
     tools: list[dict[str, Any]] | None = None,
+    keep_alive: str | None = None,
     timeout: float = 300.0,
 ) -> Iterator[dict[str, Any]]:
     """Yield Ollama /api/chat NDJSON chunks as dicts."""
@@ -74,6 +75,11 @@ def chat_stream(
         payload["options"] = options
     if tools:
         payload["tools"] = tools
+    if keep_alive:
+        # Without this Ollama unloads the model after about five minutes idle,
+        # so the next message pays a multi-gigabyte reload before its first
+        # token. On a phone that is the difference between a pause and a wait.
+        payload["keep_alive"] = keep_alive
     try:
         resp = _request("/api/chat", payload, timeout=timeout)
     except urllib.error.HTTPError as exc:
@@ -101,24 +107,73 @@ def chat_once(model: str, messages: list[dict[str, Any]], *, timeout: float = 30
     return "".join(parts)
 
 
+def chat_stream_full(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    options: dict[str, Any] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    keep_alive: str | None = None,
+    timeout: float = 300.0,
+) -> Iterator[dict[str, Any]]:
+    """
+    Stream a turn *and* assemble the complete message, including tool calls.
+
+    This exists because the two things were previously exclusive: the tool
+    loop needed `tool_calls` intact, so it asked for the whole message at once
+    and the user saw nothing until generation finished. Measured, that cost
+    the entire generation time before the first word appeared — on a phone,
+    twenty seconds of blank screen.
+
+    Yields ``{"type": "token", "text": …}`` as content arrives, then exactly
+    one ``{"type": "message", "message": {…}}`` with the assembled turn. Tool
+    calls are collected from whichever chunks carry them, so the loop gets
+    what it needs without giving up the stream.
+    """
+    content: list[str] = []
+    calls: list[dict[str, Any]] = []
+    role = "assistant"
+
+    for chunk in chat_stream(model, messages, options=options, tools=tools,
+                             keep_alive=keep_alive, timeout=timeout):
+        message = chunk.get("message") or {}
+        role = message.get("role") or role
+        for call in message.get("tool_calls") or []:
+            calls.append(call)
+        piece = message.get("content") or ""
+        if piece:
+            content.append(piece)
+            # Held back when a tool call has already been seen: that text is
+            # the model narrating its own call, and showing it as the answer
+            # would read as if it had finished.
+            if not calls:
+                yield {"type": "token", "text": piece}
+        if chunk.get("done"):
+            break
+
+    assembled: dict[str, Any] = {"role": role, "content": "".join(content)}
+    if calls:
+        assembled["tool_calls"] = calls
+    yield {"type": "message", "message": assembled}
+
+
 def chat_full(
     model: str,
     messages: list[dict[str, Any]],
     *,
+    options: dict[str, Any] | None = None,
     tools: list[dict[str, Any]] | None = None,
+    keep_alive: str | None = None,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
-    """
-    One non-streamed turn, returning the whole assistant message.
-
-    The tool loop needs the message intact — `tool_calls` and all — and a
-    streamed turn hands those back in pieces whose assembly differs between
-    Ollama versions. Asking for the complete message is both simpler and the
-    same number of round trips.
-    """
+    """One non-streamed turn, returning the whole assistant message."""
     payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    if options:
+        payload["options"] = options
     if tools:
         payload["tools"] = tools
+    if keep_alive:
+        payload["keep_alive"] = keep_alive
     try:
         resp = _request("/api/chat", payload, timeout=timeout)
     except urllib.error.HTTPError as exc:

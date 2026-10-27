@@ -507,6 +507,16 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .msg-actions { display: flex; gap: 5px; margin-top: 4px; }
 
+/* How long the turn took. Quiet enough to ignore, there when you look. */
+.msg-timing {
+  margin-top: 3px;
+  font-size: .56em;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+  opacity: .72;
+  font-variant-numeric: tabular-nums;
+}
+
 .composer { display: flex; gap: 6px; align-items: flex-end; }
 .composer textarea {
   flex: 1 1 auto; resize: none; max-height: 84px;

@@ -170,10 +170,28 @@ export default class Chat {
     this._autosize();
     this.addMessage('user', text);
 
-    const body = this.addMessage('jarvis', '');
-    const bubble = body.parentElement;
-    bubble.classList.add('is-streaming');
+    // One turn can produce several bubbles: the model may say something,
+    // call a tool, then carry on. Each run of text is its own bubble so the
+    // transcript reads in the order things happened, instead of text jumping
+    // around a tool card that arrived after it.
+    let segment = this._newSegment();
     let answer = '';
+
+    const appendText = (chunk) => {
+      if (!segment) segment = this._newSegment();
+      segment.text += chunk;
+      segment.body.textContent = segment.text;
+      answer += chunk;
+    };
+
+    // A tool card is about to land. Close off whatever has been said so far;
+    // anything after the tool starts a fresh bubble.
+    const closeSegment = () => {
+      if (!segment) return;
+      segment.bubble.classList.remove('is-streaming');
+      if (!segment.text) segment.bubble.remove();
+      segment = null;
+    };
 
     this._setBusy(true);
     this.onActivity?.('thinking');
@@ -185,43 +203,85 @@ export default class Chat {
           if (data.conversation_id) state.set({ conversationId: data.conversation_id });
         },
         onToken: (chunk) => {
-          answer += chunk;
-          body.textContent = answer;
+          appendText(chunk);
           this._follow(false);
         },
         onToolCall: (data) => {
-          // The answer bubble is empty until the tools are done; move it to
-          // the end so the transcript reads call -> result -> answer.
+          closeSegment();
           this._toolCard(data);
-          this.messages.appendChild(bubble);
         },
         onToolResult: (data) => {
+          closeSegment();
           this._toolResult(data);
-          this.messages.appendChild(bubble);
         },
         onToolApproval: (data) => {
+          closeSegment();
           this._toolApproval(data);
-          this.messages.appendChild(bubble);
         },
         onError: (data) => {
-          bubble.classList.add('msg-error');
-          body.textContent = tLLMError(data.code, data.detail);
+          if (!segment) segment = this._newSegment();
+          segment.bubble.classList.add('msg-error');
+          segment.body.textContent = tLLMError(data.code, data.detail);
+          segment.text = ' ';     // keep the bubble: it carries the error
         },
         onDone: (data) => {
           const finalText = (data.text || answer).trim();
-          body.textContent = finalText;
+          // The text is already on screen, streamed. Only write it out again
+          // if nothing arrived — a provider that answered in one piece.
+          if (!answer && finalText) appendText(finalText);
+          const last = segment || this._lastBubble();
           this.onReply?.(finalText);
-          if (finalText) this._addReplay(bubble, finalText, language);
+          if (finalText && last) {
+            this._addReplay(last.bubble, finalText, language);
+            this._addTiming(last.bubble, data);
+          }
           this.voice?.speak(finalText, language);
         },
         onClose: () => {
-          bubble.classList.remove('is-streaming');
+          closeSegment();
           this.stream = null;
           this._setBusy(false);
           if (state.get('activity') === 'thinking') this.onActivity?.('idle');
         },
       },
     );
+  }
+
+  /** A fresh, empty JARVIS bubble to stream the next run of text into. */
+  _newSegment() {
+    const body = this.addMessage('jarvis', '');
+    const bubble = body.parentElement;
+    bubble.classList.add('is-streaming');
+    return { body, bubble, text: '' };
+  }
+
+  _lastBubble() {
+    const bubbles = [...(this.messages?.querySelectorAll('.msg-jarvis') || [])];
+    const bubble = bubbles[bubbles.length - 1];
+    if (!bubble) return null;
+    return { bubble, body: bubble.querySelector('.msg-body'), text: '' };
+  }
+
+  /**
+   * How long the turn took, under the answer.
+   *
+   * Two numbers rather than one, because they mean different things: a large
+   * time-to-first-word with a quick finish is the model loading or thinking,
+   * while the reverse is JARVIS getting in the way. Without the split, a slow
+   * answer is just "slow".
+   */
+  _addTiming(bubble, data) {
+    if (!bubble || data.ms_total == null) return;
+    const line = document.createElement('div');
+    line.className = 'msg-timing';
+    const first = data.ms_first_token;
+    line.textContent = first == null
+      ? t('chat.timingTotal', { total: (data.ms_total / 1000).toFixed(1) })
+      : t('chat.timing', {
+        first: (first / 1000).toFixed(1),
+        total: (data.ms_total / 1000).toFixed(1),
+      });
+    bubble.appendChild(line);
   }
 
   /**
