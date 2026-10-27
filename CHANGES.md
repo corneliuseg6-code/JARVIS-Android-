@@ -2,6 +2,79 @@
 
 ---
 
+# V4 Phase 1d — one continuous background behind the collapsed panel
+
+The requirement: when the conversation slides away, what it uncovers must be
+the same cosmic background as the rest of the screen — no dark panel, no
+seam, no mismatched colour. Measuring that turned up two real defects that
+the earlier start-and-end checks could not see.
+
+## The slide was not sliding
+
+`.chat-panel`'s collapse transition was being **silently dropped**. The
+immersive-mode rule further down the stylesheet lists the panel among the
+elements that fade:
+
+```css
+.topbar, .rail, .dock, … , .chat-panel, .mode-row {
+  transition: opacity .18s ease, transform .18s ease;
+}
+```
+
+`transition` is not additive and that rule comes later, so `max-height` was
+never in the final declaration. The panel snapped shut in one frame. Measured
+mid-collapse, it was 18 px on the very first sample. The panel now has its own
+declaration carrying all three properties, and the same measurement reads
+**421 → 318 → 102 → 20 → 18**.
+
+## And it was animating over the wrong range
+
+The open state is `max-height: 2000px`, because a transition cannot start from
+`none`. The panel is only about 420 px tall, so collapsing animated 2000 → 22
+and *nothing moved* for the first two thirds of the slide. `setCollapsed()`
+now pins the start to the panel's measured height, so every millisecond of the
+transition is visible movement, then hands the panel back to the stylesheet so
+an open panel can still grow with the conversation.
+
+## The mask could go stale
+
+The particle field is drawn inside a clip that excludes the conversation and
+the chat bar, and those rectangles were refreshed by a `ResizeObserver`. An
+observer only fires on a **size** change — so an element that *moves* without
+resizing keeps a stale rectangle, and the particles get cut out of the wrong
+strip of screen. The chat bar does exactly that when the keyboard opens.
+
+The rectangles are now re-read four times a second, and every frame while
+anything is actually moving (detected by comparing readings, so a drag or a
+slide is tracked without wiring the backdrop to the panel). Two layout reads
+at 4 Hz, against the 120 Hz the original comment was rightly worried about.
+
+## Verified, by measurement rather than by eye
+
+With the panel collapsed, in the 199 px the conversation used to occupy:
+
+| Check | Result |
+|---|---|
+| Particles present | 2 449 lit pixels, **29.9 per 1 000** against **27.9** in the band above |
+| Anything painting there | **none** — no background, image or border from any element |
+| A visible seam | sharpest row-to-row brightness change **1.25 levels** (a panel edge jumps by tens) |
+| Colour match | mean brightness **10.4** in the freed area vs **10.1** above |
+| Mid-slide | panel 421 → 318 → 102 → 20 → 18, particles under it 46 → 392 → 685 as it clears |
+| Input bar | y unchanged, input and Send still visible |
+
+The seam scan decodes the screenshot inside Chromium rather than adding a PNG
+library, so the project stays dependency-free.
+
+One note on the method: the first version of the "is anything painting there"
+check reported three elements, and all three were false positives — it ignored
+horizontal overlap (the nav drawer is slid off to the side), opacity inherited
+from a parent, and clipping by an ancestor's `overflow: hidden`. It now walks
+the ancestors for effective opacity and intersects with every clipping box.
+A check that reports things which are not on screen is worth nothing as a
+regression test.
+
+---
+
 # V4 Phase 1c — three interface changes
 
 ## The clock is amber

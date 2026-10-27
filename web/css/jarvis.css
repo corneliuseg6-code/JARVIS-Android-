@@ -1230,8 +1230,16 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
    They fade rather than being switched off, so the transition is smooth and
    the canvas — watched by a ResizeObserver — keeps step with it instead of
    jumping at the end. */
-.topbar, .rail, .dock, .avatar-card, .focus-block, .chat-panel, .mode-row {
+.topbar, .rail, .dock, .avatar-card, .focus-block, .mode-row {
   transition: opacity .18s ease, transform .18s ease;
+}
+/* The conversation panel needs its collapse in the same declaration: this
+   rule comes after the one that sets up the slide, and `transition` is not
+   additive — listing the panel above silently dropped max-height and the
+   panel snapped shut instead of sliding. */
+.chat-panel {
+  transition: opacity .18s ease, transform .18s ease,
+              max-height .3s cubic-bezier(.22, .61, .36, 1);
 }
 
 /* The stage leaves the column entirely and takes the screen. Lifting it out

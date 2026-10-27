@@ -104,11 +104,24 @@ export default class Chat {
       if (!dragging) return;
       dragging = false;
       this.panel.classList.remove('is-dragging');
-      this.panel.style.maxHeight = '';
-      // A short drag is a tap or a wobble; leave the panel as it was.
+      // A short drag is a tap or a wobble; leave the panel as it was, but
+      // animate it back from where the finger left it.
       const THRESHOLD = 44;
-      if (Math.abs(moved) < THRESHOLD) return;
-      this.setCollapsed(moved > 0);
+      const target = Math.abs(moved) < THRESHOLD ? this.collapsed : moved > 0;
+      // The inline height from the drag is the animation's starting point,
+      // so it is left in place for setCollapsed to transition away from.
+      if (target === this.collapsed) {
+        const to = target ? (this.gripH || 22) : this._maxPanelHeight();
+        requestAnimationFrame(() => {
+          if (this.panel) this.panel.style.maxHeight = to + 'px';
+        });
+        clearTimeout(this._settle);
+        this._settle = setTimeout(() => {
+          if (this.panel) this.panel.style.maxHeight = '';
+        }, 340);
+        return;
+      }
+      this.setCollapsed(target);
     };
 
     this.grip?.addEventListener('pointerdown', (e) => begin(e, false));
@@ -141,8 +154,11 @@ export default class Chat {
     this.panel.addEventListener('pointermove', move);
     this.panel.addEventListener('pointerup', end);
 
-    this.app.style.setProperty('--chat-grip-h', gripHeight() + 'px');
-    this.setCollapsed(this._remembered(), { silent: true });
+    this.gripH = gripHeight();
+    this.app.style.setProperty('--chat-grip-h', this.gripH + 'px');
+    // The remembered state is applied without animating: a panel that slides
+    // shut on every load would look like a glitch, not a preference.
+    this.setCollapsed(this._remembered(), { silent: true, animate: false });
   }
 
   _endDrag() {
@@ -164,9 +180,38 @@ export default class Chat {
     return this.app?.dataset.chat === 'collapsed';
   }
 
-  setCollapsed(collapsed, { silent = false } = {}) {
+  setCollapsed(collapsed, { silent = false, animate = true } = {}) {
     if (!this.app) return;
+    const wasCollapsed = this.collapsed;
     this.app.dataset.chat = collapsed ? 'collapsed' : 'open';
+
+    // Animate between the panel's *real* heights.
+    //
+    // The stylesheet's open state is `max-height: 2000px`, because a
+    // transition cannot start from `none`. Left alone, collapsing animates
+    // 2000px down to 22px — and since the panel is only ~420px tall, nothing
+    // moves for the first two thirds of the slide and then it drops all at
+    // once. Pinning the start to the measured height makes every millisecond
+    // of the transition visible movement.
+    if (animate && this.panel && wasCollapsed !== collapsed) {
+      const from = this.panel.getBoundingClientRect().height;
+      const to = collapsed
+        ? (this.gripH || 22)
+        : this._maxPanelHeight();
+      this.panel.style.maxHeight = from + 'px';
+      void this.panel.offsetHeight;          // flush, so the next value animates
+      requestAnimationFrame(() => {
+        if (!this.panel) return;
+        this.panel.style.maxHeight = to + 'px';
+      });
+      clearTimeout(this._settle);
+      this._settle = setTimeout(() => {
+        // Hand the panel back to the stylesheet: inline heights would stop
+        // an open panel growing with the conversation.
+        if (this.panel) this.panel.style.maxHeight = '';
+      }, 340);
+    }
+
     if (this.grip) {
       this.grip.setAttribute('aria-expanded', String(!collapsed));
       const key = collapsed ? 'chat.expand' : 'chat.collapse';

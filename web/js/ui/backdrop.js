@@ -66,6 +66,8 @@ export default class Backdrop {
     // edges and corners, so the layer is cut out around it entirely.
     this.masked = [];
     this.maskRects = [];
+    this.maskedAt = 0;          // when the rectangles were last read
+    this.maskSettleUntil = 0;   // measure every frame until this timestamp
 
     if (this.canvas) {
       this.observer = new ResizeObserver(() => this.resize());
@@ -94,11 +96,21 @@ export default class Backdrop {
     this._measureMasks();
   }
 
+  /** Returns true when anything moved or resized since the last reading. */
   _measureMasks() {
-    this.maskRects = this.masked.map((el) => {
+    const next = this.masked.map((el) => {
       const r = el.getBoundingClientRect();
       return { x: r.left, y: r.top, w: r.width, h: r.height };
     });
+    const previous = this.maskRects || [];
+    const changed = next.length !== previous.length || next.some((m, i) => {
+      const p = previous[i];
+      // Half a pixel: below that is sub-pixel noise, not movement.
+      return !p || Math.abs(p.x - m.x) > 0.5 || Math.abs(p.y - m.y) > 0.5
+          || Math.abs(p.w - m.w) > 0.5 || Math.abs(p.h - m.h) > 0.5;
+    });
+    this.maskRects = next;
+    return changed;
   }
 
   /** The figure and the nebula belong to full screen; the motes do not. */
@@ -205,6 +217,21 @@ export default class Backdrop {
     // dropped frame does not make the field jump.
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
+
+    // A ResizeObserver only fires when a masked element changes *size*. The
+    // chat bar changes position without resizing when the keyboard opens, and
+    // the conversation panel both moves and resizes as it collapses — a stale
+    // rectangle would cut the particles out of the wrong strip of screen and
+    // read as a seam. Re-measuring four times a second is two layout reads,
+    // far below the cost of doing it every frame.
+    // While something is actually moving — a finger dragging the panel, or
+    // the slide animating — four times a second would lag visibly behind it,
+    // so a change switches to every frame until it settles.
+    if (now < this.maskSettleUntil || now - this.maskedAt > 250) {
+      this.maskedAt = now;
+      if (this._measureMasks()) this.maskSettleUntil = now + 450;
+    }
+
     this._draw(now / 1000, dt);
     this.frame = requestAnimationFrame(this._loop);
   }
