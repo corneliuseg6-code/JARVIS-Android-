@@ -76,6 +76,8 @@ export default {
   "armory.transportStdio": "Local process (stdio)",
   "armory.transportHttp": "HTTP endpoint",
   "armory.command": "Command",
+  "chat.collapse": "Hide the conversation",
+  "chat.expand": "Show the conversation",
   "chat.timing": "first word {first}s · {total}s total",
   "chat.timingTotal": "{total}s total",
   "settings.keepAlive": "Keep model loaded",

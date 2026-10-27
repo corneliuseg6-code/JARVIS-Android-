@@ -76,6 +76,8 @@ export default {
   "armory.transportStdio": "Proces local (stdio)",
   "armory.transportHttp": "Adresă HTTP",
   "armory.command": "Comandă",
+  "chat.collapse": "Ascunde conversația",
+  "chat.expand": "Arată conversația",
   "chat.timing": "primul cuvânt {first}s · {total}s total",
   "chat.timingTotal": "{total}s total",
   "settings.keepAlive": "Menține modelul încărcat",

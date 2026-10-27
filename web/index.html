@@ -205,6 +205,13 @@
        Always open, and the only thing that grows: it takes every pixel the
        console and the chat bar do not need. -->
   <section class="chat-panel" id="chat-panel">
+    <!-- Drag me down to get the dial out from behind the conversation.
+         A button, not a bare div, so it answers to a tap and to a keyboard. -->
+    <button class="chat-grip" id="chat-grip" type="button"
+            aria-controls="messages" aria-expanded="true"
+            data-i18n-aria="chat.collapse" data-i18n-title="chat.collapse">
+      <span class="chat-grip-bar" aria-hidden="true"></span>
+    </button>
     <div class="chat-head">
       <button class="btn btn-ghost btn-sm" id="btn-history" type="button" data-i18n="chat.history">History</button>
       <button class="btn btn-ghost btn-sm" id="btn-new-chat" type="button" data-i18n="chat.new">New</button>

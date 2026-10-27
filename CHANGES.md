@@ -2,6 +2,103 @@
 
 ---
 
+# V4 Phase 1c — three interface changes
+
+## The clock is amber
+
+`--hud-amber: #ffd60a` for the time, `--hud-amber-dim: #f7c948` for the line
+below it, both with a warm glow. The weekday, day and month share one element
+(`#hud-date`), so one rule covers all three. About 13:1 against the page
+background — readable at a glance, and it now reads as an instrument rather
+than as more chrome. Position, size and the ticking seconds are unchanged.
+
+## The black rectangle behind the rings
+
+Worth being precise about, because the answer was not where it was expected.
+
+**The rings container was already transparent.** Measured in the running app:
+`#stage` and both canvases compute to `rgba(0, 0, 0, 0)`, `rings.js` only ever
+calls `clearRect`, and the particle field draws *more* densely inside the dial
+than below it (2 509 lit pixels in the stage square). The box removed in
+`766c3dd` has not come back.
+
+What *is* a solid near-black rectangle over the rings is **the standby veil**.
+`.standby-veil` is `position: absolute; inset: 0` inside `#stage`, filled with
+a flat `rgba(2, 8, 14, .9)` — a 275×275 opaque box sitting exactly where the
+rings are, shown whenever JARVIS is in standby. It is the only element in the
+stage that has ever painted one.
+
+It is now a radial fade with a matching mask: dark enough at the centre to
+read the STANDBY notice, transparent at the corners, so the particle field
+shows through and the dial never reads as a rectangle. The notice, the Resume
+button and the blur all behave as before.
+
+A test now asserts that **nothing** inside `#stage` computes a background with
+alpha above 0.05, in both active and standby, so this cannot quietly return.
+
+If a black box is still on screen after this update, it is a stale cached
+build rather than a style: the service worker cache is bumped to
+`jarvis-v4-3-ui`, and an installed PWA may need to be closed completely (not
+just backgrounded) before the new shell is picked up.
+
+## The conversation collapses
+
+A grip sits at the top of the conversation panel. Drag it down and the panel
+slides away; drag up, or tap it, and it comes back.
+
+- **The input bar cannot move.** `.dock` is a sibling of the workspace, not a
+  child of the panel, so collapsing the panel does not touch it. Verified: the
+  dock's y is identical before and after (868 px both times) and both the
+  input and Send stay visible.
+- **Scrolling still works.** A drag that starts inside the message list is
+  only treated as a collapse when the list is already scrolled to the top and
+  the finger is moving down. Mid-conversation, a swipe scrolls and the panel
+  does not move — verified with a 40-message list at `scrollTop 1454`.
+- **Pointer events, not touch events**, so one code path serves a finger on
+  Android and a mouse on a desktop. The grip carries `touch-action: none`;
+  without it Android claims the vertical drag for a page pan before the panel
+  sees it.
+- The drag follows the finger, and a release under 44 px snaps back — a wobble
+  is not a command.
+- Collapsed, the console band centres in the freed space: the dial moves from
+  y 103 to y 305 rather than leaving a hole at the bottom.
+- Sending a message reopens the panel, so a reply never streams into a closed
+  drawer.
+- The state is remembered per device in `localStorage`, wrapped in try/catch
+  so private mode cannot break the panel.
+- `prefers-reduced-motion` turns the slide off.
+
+## Verified
+
+In the running app at 412×915 with touch emulation, driving real
+`PointerEvent`s with `pointerType: 'touch'`:
+
+| | Result |
+|---|---|
+| Clock colour | time `rgb(255, 214, 10)`, date `rgb(247, 201, 72)`, seconds still ticking |
+| Nothing opaque in the stage | zero elements with background alpha > 0.05 |
+| Particles behind the rings | 2 509 lit pixels inside the dial |
+| Standby | radial fade plus mask, not a flat fill |
+| Swipe down | panel 421 px → 18 px, state `collapsed` |
+| Input bar | y 868 → 868, input and Send still visible |
+| Swipe up | back to 421 px, state `open` |
+| Tap the grip | collapses, and tapping again reopens |
+| Swipe mid-scroll | `scrollTop` unchanged at 1454, panel stays open |
+| Swipe from the top of the list | collapses |
+| Send while collapsed | reopens |
+| V3 layout | dial 275 px, RINGS/FACE bar matching, four shortcuts, no page scroll |
+
+All five Python suites still pass (249 checks), as do the voice and
+streaming browser suites.
+
+**Not verified: a real finger on a real Galaxy.** The gestures are driven by
+synthesised pointer events in a touch-emulated Chromium, which exercises the
+same handlers Android does but not Android's own scroll arbitration. Flick
+momentum and the interaction with the system back-gesture at the screen edge
+have to be felt on the phone.
+
+---
+
 # V4 Phase 1b — the voice system
 
 Four symptoms were reported. They had three causes, and the most important

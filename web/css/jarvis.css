@@ -31,6 +31,10 @@
   --text-dim:      #74a0a8;
   --ok:            #2ee6a8;
   --warn:          #ffc13d;
+  /* The clock. Brighter and purer than --warn, which is reserved for things
+     that want attention; the clock wants to be read, not reacted to. */
+  --hud-amber:     #ffd60a;
+  --hud-amber-dim: #f7c948;
   --bad:           #ff5d6c;
   --busy:          #6fb4ff;
   --radius:        10px;
@@ -363,9 +367,23 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .stage-note[hidden] { display: none; }
 .stage-note.is-warn { color: var(--warn); text-shadow: none; }
 
+/* Standby dims the dial without boxing it in.
+   This was a flat rgba(2, 8, 14, .9) over `inset: 0` — a 275×275 near-opaque
+   rectangle sitting exactly where the rings are, which is the only thing in
+   the stage that has ever drawn a solid black box. A radial fade darkens the
+   centre enough to read the notice while the particle field still shows
+   through at the corners, so the stage never reads as a rectangle. */
 .standby-veil {
   position: absolute; inset: 0; display: grid; place-items: center;
-  background: rgba(2, 8, 14, .9); backdrop-filter: blur(3px); z-index: 5;
+  background: radial-gradient(circle at 50% 50%,
+              rgba(2, 8, 14, .92) 0%,
+              rgba(2, 8, 14, .86) 42%,
+              rgba(2, 8, 14, .55) 72%,
+              rgba(2, 8, 14, 0) 100%);
+  backdrop-filter: blur(3px);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 62%, transparent 100%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 62%, transparent 100%);
+  z-index: 5;
   padding: 12px; text-align: center;
 }
 .standby-veil[hidden] { display: none; }
@@ -466,6 +484,61 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   padding: 4px 6px 6px;
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--panel);
+}
+
+/* ---------- the conversation collapses out of the way ----------
+   The dock is a sibling of the workspace, not a child of this panel, so the
+   input bar and Send stay exactly where they are whatever this does. */
+.chat-panel {
+  /* A concrete ceiling, because a transition cannot animate out of `none`.
+     Far taller than any phone, so it never clips an expanded panel. */
+  max-height: 2000px;
+  transition: max-height .3s cubic-bezier(.22, .61, .36, 1);
+  overflow: hidden;
+}
+.chat-grip {
+  flex: none;
+  display: flex; align-items: center; justify-content: center;
+  height: 18px; margin: -2px 0 1px; padding: 0;
+  background: none; border: 0; cursor: grab;
+  /* The browser must not claim the vertical drag for scrolling: without
+     this, Android starts a page pan and the panel never sees the gesture. */
+  touch-action: none;
+}
+.chat-grip:active { cursor: grabbing; }
+.chat-grip-bar {
+  width: 42px; height: 3px; border-radius: 999px;
+  background: var(--line);
+  box-shadow: 0 0 8px rgba(67, 222, 210, .25);
+  transition: background .18s ease, width .18s ease;
+}
+.chat-grip:hover .chat-grip-bar,
+.chat-grip:focus-visible .chat-grip-bar { background: var(--teal-soft); width: 54px; }
+
+/* Collapsed: the grip alone remains, and everything below it is gone from
+   the layout so the freed height goes back to the console. */
+.app[data-chat="collapsed"] .chat-panel {
+  max-height: var(--chat-grip-h, 22px);
+  border-color: transparent;
+  background: none;
+}
+.app[data-chat="collapsed"] .chat-head,
+.app[data-chat="collapsed"] .messages,
+.app[data-chat="collapsed"] .history-list { opacity: 0; pointer-events: none; }
+.app[data-chat="collapsed"] .chat-grip-bar { width: 58px; background: var(--teal-soft); }
+.chat-head, .messages { transition: opacity .18s ease; }
+
+/* With the conversation out of the way, centre what is left rather than
+   leaving the dial pinned to the top above empty space. */
+.workspace { transition: justify-content .3s ease; }
+.app[data-chat="collapsed"] .workspace { justify-content: center; }
+
+/* While a finger is on the grip, follow it exactly — no transition fighting
+   the drag. The class is removed on release so the snap animates. */
+.chat-panel.is-dragging { transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-panel, .workspace, .chat-head, .messages { transition: none; }
 }
 
 .chat-head { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
@@ -870,14 +943,18 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   display: flex; flex-direction: column; align-items: center; gap: 0;
   pointer-events: none; text-align: center;
 }
+/* The clock reads as an instrument, not as chrome: a bright amber that holds
+   up against the particle field drifting behind it. 13:1 against the page
+   background, so it stays legible at a glance in sunlight. */
 .hud-time {
   font-size: 1.00em; font-weight: 700; letter-spacing: .14em; line-height: 1.05;
-  color: var(--teal-soft); text-shadow: 0 0 14px rgba(67, 222, 210, .55);
+  color: var(--hud-amber); text-shadow: 0 0 14px rgba(255, 198, 0, .5);
   font-variant-numeric: tabular-nums;
 }
+/* Weekday, day and month share this line, so one rule covers all three. */
 .hud-date {
   font-size: .50em; letter-spacing: .20em; text-transform: uppercase; line-height: 1.3;
-  color: var(--text-dim);
+  color: var(--hud-amber-dim); text-shadow: 0 0 10px rgba(255, 198, 0, .3);
 }
 
 /* ===================== the travelling edge pulse =====================

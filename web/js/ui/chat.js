@@ -38,6 +38,149 @@ export default class Chat {
     this.stopBtn?.addEventListener('click', () => this.abort());
     this.newBtn?.addEventListener('click', () => this.newConversation());
     this.historyBtn?.addEventListener('click', () => this.toggleHistory());
+
+    this._initCollapse();
+  }
+
+  // ---------------------------------------------------------------- collapse
+
+  /**
+   * Swipe the conversation down to clear the screen, up to bring it back.
+   *
+   * Pointer events rather than touch events: the same code then answers to a
+   * finger on Android and to a mouse, which is also what makes the gesture
+   * testable. The grip carries `touch-action: none` so the browser does not
+   * claim the vertical drag for a page scroll before we see it.
+   */
+  _initCollapse() {
+    this.panel = document.getElementById('chat-panel');
+    this.grip = document.getElementById('chat-grip');
+    this.app = document.getElementById('app');
+    if (!this.panel || !this.app) return;
+
+    // The grip's height is the collapsed height; measure it rather than
+    // hard-coding it twice.
+    const gripHeight = () => Math.round(this.grip?.getBoundingClientRect().height || 22);
+
+    let start = 0;
+    let startHeight = 0;
+    let dragging = false;
+    let moved = 0;
+    let fromList = false;
+
+    const begin = (event, viaList) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      dragging = true;
+      fromList = viaList;
+      moved = 0;
+      start = event.clientY;
+      startHeight = this.panel.getBoundingClientRect().height;
+      this.panel.classList.add('is-dragging');
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* fine */ }
+    };
+
+    const move = (event) => {
+      if (!dragging) return;
+      const delta = event.clientY - start;
+      moved = delta;
+      // A drag that began in the message list only counts while the list is
+      // at the very top and the finger is going down — otherwise it is a
+      // scroll and must be left alone.
+      if (fromList && (delta < 0 || this.messages.scrollTop > 0)) {
+        this._endDrag();
+        dragging = false;
+        return;
+      }
+      event.preventDefault();
+      const min = gripHeight();
+      const max = this._maxPanelHeight();
+      // One formula serves both directions: dragging down (positive delta)
+      // shrinks the panel, dragging up grows it, whichever state it is in.
+      const next = Math.max(min, Math.min(max, startHeight - delta));
+      this.panel.style.maxHeight = next + 'px';
+    };
+
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      this.panel.classList.remove('is-dragging');
+      this.panel.style.maxHeight = '';
+      // A short drag is a tap or a wobble; leave the panel as it was.
+      const THRESHOLD = 44;
+      if (Math.abs(moved) < THRESHOLD) return;
+      this.setCollapsed(moved > 0);
+    };
+
+    this.grip?.addEventListener('pointerdown', (e) => begin(e, false));
+    this.grip?.addEventListener('pointermove', move);
+    this.grip?.addEventListener('pointerup', end);
+    this.grip?.addEventListener('pointercancel', end);
+    // A tap on the grip toggles. Guarded so the end of a drag is not also
+    // read as a tap.
+    this.grip?.addEventListener('click', () => {
+      if (Math.abs(moved) >= 8) { moved = 0; return; }
+      this.setCollapsed(!this.collapsed);
+    });
+
+    // Swiping within the conversation itself, but only from the top of it.
+    this.messages?.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return;      // a mouse scrolls with the wheel
+      if (this.messages.scrollTop > 0) return;    // mid-scroll: not our gesture
+      begin(e, true);
+    });
+    this.messages?.addEventListener('pointermove', move);
+    this.messages?.addEventListener('pointerup', end);
+    this.messages?.addEventListener('pointercancel', end);
+
+    // While collapsed the panel is only the grip, so an upward swipe there
+    // is the way back.
+    this.panel.addEventListener('pointerdown', (e) => {
+      if (!this.collapsed || e.target === this.grip || this.grip?.contains(e.target)) return;
+      begin(e, false);
+    });
+    this.panel.addEventListener('pointermove', move);
+    this.panel.addEventListener('pointerup', end);
+
+    this.app.style.setProperty('--chat-grip-h', gripHeight() + 'px');
+    this.setCollapsed(this._remembered(), { silent: true });
+  }
+
+  _endDrag() {
+    this.panel?.classList.remove('is-dragging');
+    if (this.panel) this.panel.style.maxHeight = '';
+  }
+
+  /** How tall the panel may grow: what the workspace can actually give it. */
+  _maxPanelHeight() {
+    const workspace = this.panel?.parentElement;
+    if (!workspace) return 2000;
+    const others = [...workspace.children]
+      .filter((el) => el !== this.panel && !el.hidden)
+      .reduce((total, el) => total + el.getBoundingClientRect().height, 0);
+    return Math.max(80, workspace.getBoundingClientRect().height - others - 10);
+  }
+
+  get collapsed() {
+    return this.app?.dataset.chat === 'collapsed';
+  }
+
+  setCollapsed(collapsed, { silent = false } = {}) {
+    if (!this.app) return;
+    this.app.dataset.chat = collapsed ? 'collapsed' : 'open';
+    if (this.grip) {
+      this.grip.setAttribute('aria-expanded', String(!collapsed));
+      const key = collapsed ? 'chat.expand' : 'chat.collapse';
+      this.grip.setAttribute('aria-label', t(key));
+      this.grip.title = t(key);
+    }
+    if (!collapsed) this._follow(true);
+    if (!silent) {
+      try { localStorage.setItem('jarvis.chatCollapsed', collapsed ? '1' : '0'); } catch { /* private mode */ }
+    }
+  }
+
+  _remembered() {
+    try { return localStorage.getItem('jarvis.chatCollapsed') === '1'; } catch { return false; }
   }
 
   /**
@@ -164,6 +307,9 @@ export default class Chat {
 
     const cfg = state.get('config') || {};
     const language = cfg.conversation_language || 'ro';
+    // Asking a question is asking to see the answer: a collapsed panel comes
+    // back rather than streaming a reply into a closed drawer.
+    if (this.collapsed) this.setCollapsed(false);
     this.onSend?.(text);
     this._stick = true;        // sending is asking to see the answer
     this.input.value = '';
