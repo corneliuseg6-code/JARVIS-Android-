@@ -6,9 +6,10 @@
  * the whole page dying at the first error (the classic "buttons do nothing"
  * symptom).
  *
- * The shell is: top bar, status strip, visualiser, HUD, chat dock — with the
- * navigation as a drawer and the panels as a sheet, so neither can steal
- * vertical space from the visualiser.
+ * The shell is: top bar, the console band (rings between a status rail and a
+ * control rail, hologram in the corner), the conversation, and the chat bar —
+ * with the navigation as a drawer and the panels as a sheet, so neither can
+ * steal space from the other two.
  */
 import { api } from './core/api.js';
 import * as state from './core/state.js';
@@ -25,6 +26,11 @@ import Status from './ui/status.js';
 import Chat from './ui/chat.js';
 import Armory from './ui/armory.js';
 import Eyes from './ui/eyes.js';
+import Connections from './ui/connections.js';
+import Fullscreen from './ui/fullscreen.js';
+import Shortcuts from './ui/shortcuts.js';
+import Clock from './ui/clock.js';
+import Backdrop from './ui/backdrop.js';
 import Modes from './ui/modes.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
@@ -32,10 +38,12 @@ import { toast } from './ui/toast.js';
 const app = {
   avatar: null, mic: null, voice: null, power: null, magnifier: null,
   status: null, chat: null, armory: null, eyes: null, modes: null, settings: null,
+  connections: null, fullscreen: null, shortcuts: null, clock: null,
+  backdrop: null,
 };
 
 const root = document.getElementById('app');
-const SHEET_VIEWS = ['armory', 'eyes', 'settings'];
+const SHEET_VIEWS = ['armory', 'eyes', 'connections', 'settings'];
 
 function guard(name, fn) {
   try {
@@ -49,9 +57,26 @@ function guard(name, fn) {
 }
 
 // ---------------------------------------------------------------- activity
+/**
+ * The edge pulse reports what JARVIS is doing.
+ *
+ * Green while it is listening, thinking or speaking; red while it is standing
+ * by or in standby. It reads the same two pieces of state the activity pill
+ * does, from the same function, so the border and the pill can never tell you
+ * different things.
+ */
+function applyEdgeState() {
+  const edge = document.getElementById('edge');
+  if (!edge) return;
+  const busy = state.get('power') !== 'standby'
+    && ['listening', 'thinking', 'speaking'].includes(state.get('activity'));
+  edge.dataset.state = busy ? 'busy' : 'rest';
+}
+
 function setActivity(activity) {
   state.set({ activity });
   root?.setAttribute('data-activity', activity);
+  applyEdgeState();
   app.avatar?.setActivity(activity);
   const label = document.getElementById('activity-label');
   if (label) {
@@ -71,13 +96,6 @@ function setNav(open) {
   if (toggle) toggle.setAttribute('aria-expanded', String(open));
   // The scrim covers the drawer and the sheet alike.
   if (scrim) scrim.hidden = !open && !SHEET_VIEWS.includes(state.get('view'));
-}
-
-function setDock(expanded) {
-  root?.setAttribute('data-dock', expanded ? 'expanded' : 'collapsed');
-  document.getElementById('btn-dock')?.setAttribute('aria-expanded', String(expanded));
-  state.set({ dockOpen: expanded });
-  requestAnimationFrame(() => app.avatar?.resize());
 }
 
 /** 'home' shows the visualiser alone; the rest open the bottom sheet. */
@@ -111,6 +129,10 @@ function setView(view) {
   }
   if (view === 'armory') app.armory?.refresh();
   if (view === 'settings') app.settings?.refresh();
+  if (view === 'connections') app.connections?.refresh();
+  // The connections panel polls while a Claude Code run is in flight; leaving
+  // the panel stops it rather than letting it run behind a closed sheet.
+  if (view !== 'connections') app.connections?.stop();
 
   requestAnimationFrame(() => app.avatar?.resize());
 }
@@ -129,7 +151,6 @@ function setImmersive(on) {
   if (exit) exit.hidden = !on;
   if (on) {
     setNav(false);
-    setDock(false);
     if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
   }
   // Follow the rows while they fold, so the canvas grows with the stage
@@ -185,6 +206,9 @@ function trackViewport() {
       ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
       : 0;
     document.documentElement.style.setProperty('--kb', keyboard + 'px');
+    // The console sheds the hologram while the keyboard is up, so the
+    // conversation does not shrink to a couple of lines.
+    root?.setAttribute('data-kb', keyboard > 120 ? 'on' : 'off');
     app.avatar?.resize();
   };
   vv.addEventListener('resize', apply);
@@ -214,6 +238,10 @@ function applyLanguage(code, { persist = false } = {}) {
   app.mic?.render();
   app.power?.render();
   app.armory?.render();
+  app.connections?.render();
+  app.fullscreen?.render();
+  app.shortcuts?.render();
+  app.clock?.setLanguage(code);
   app.modes?.render();
   app.settings?.render();
   app.voice?.resetWarnings();
@@ -265,6 +293,8 @@ function applyAvatarMode(mode, { persist = false } = {}) {
 function applyMotion(reduced) {
   root?.setAttribute('data-motion', reduced ? 'reduced' : 'full');
   app.avatar?.setReducedMotion(reduced);
+  app.backdrop?.setReducedMotion(reduced);
+  document.getElementById('edge')?.classList.toggle('is-still', !!reduced);
 }
 
 // ---------------------------------------------------------------- boot
@@ -315,13 +345,15 @@ async function boot() {
   app.chat = guard('chat', () => new Chat({
     voice: app.voice,
     onActivity: setActivity,
-    onSend: () => setDock(true),
-    onReply: (text) => {
-      const ticker = document.getElementById('dock-ticker');
-      if (ticker) ticker.textContent = text || '';
-    },
   }));
   app.armory = guard('armory', () => new Armory());
+  app.connections = guard('connections', () => new Connections({
+    onConfigChange: (next) => {
+      state.set({ config: next });
+      app.status?.refresh();
+      app.settings?.refresh?.();
+    },
+  }));
   app.settings = guard('settings', () => new Settings({
     onLanguageChange: (code) => applyLanguage(code),
     onConfigChange: (next) => {
@@ -332,8 +364,29 @@ async function boot() {
       app.mic?.refreshLanguage();
       app.voice?.resetWarnings();
       app.modes?.render();
+      app.shortcuts?.render();
     },
   }));
+  // Ambient layers: the suspended particles and the travelling edge pulse
+  // belong to every mode, so they start here rather than with full screen.
+  app.backdrop = guard('backdrop', () => new Backdrop(
+    document.getElementById('backdrop-canvas'),
+  ));
+  // The conversation is never painted into: it is a panel in its own right,
+  // and motes behind it would still show at its edges.
+  app.backdrop?.maskOut(['.chat-panel', '.dock']);
+  app.backdrop?.start();
+  // One watchdog for the whole screen: when the dial drops a quality level
+  // because frames are slipping, the particle field sheds motes with it.
+  if (app.avatar) app.avatar.onQuality = (level) => app.backdrop?.setQuality(level);
+  app.fullscreen = guard('fullscreen', () => new Fullscreen());
+  app.fullscreen?.setBackdrop(app.backdrop);
+  app.shortcuts = guard('shortcuts', () => new Shortcuts({
+    // An unconfigured slot is not a dead button: it opens the place where
+    // you give it a name and an address.
+    onConfigure: () => setView('settings'),
+  }));
+  app.clock = guard('clock', () => new Clock({ language }));
   app.magnifier = guard('magnifier', () => new Magnifier());
   app.magnifier?.setVisible(!config || config.magnifier_enabled !== false);
 
@@ -374,11 +427,6 @@ async function boot() {
     button.addEventListener('click', () => applyAvatarMode(button.dataset.mode, { persist: true }));
   });
 
-  document.getElementById('btn-dock')?.addEventListener('click', () => {
-    setDock(root?.getAttribute('data-dock') !== 'expanded');
-  });
-  document.getElementById('chat-input')?.addEventListener('focus', () => setDock(true));
-
   document.getElementById('btn-exit')?.addEventListener('click', onExit);
 
   wireStageTap();
@@ -393,16 +441,16 @@ async function boot() {
     if (state.get('immersive')) setImmersive(false);
     else if (root?.getAttribute('data-nav') === 'open') setNav(false);
     else if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
-    else if (root?.getAttribute('data-dock') === 'expanded') setDock(false);
   });
 
   on('power:standby', () => {
+    applyEdgeState();
     app.modes?.stopAll('standby');
     setNote('');
     setActivity('idle');
     app.status?.schedule();
   });
-  on('power:active', () => { setActivity('idle'); app.status?.refresh(); });
+  on('power:active', () => { applyEdgeState(); setActivity('idle'); app.status?.refresh(); });
   on('mic:on', () => setActivity('listening'));
   on('mic:off', () => {
     app.modes?.micWentOff();
@@ -412,7 +460,6 @@ async function boot() {
   setActivity('idle');
   setView('home');
   setNav(false);
-  setDock(false);
   root?.setAttribute('data-immersive', 'off');
 
   const problems = missingKeys();
@@ -462,6 +509,6 @@ boot().catch((err) => {
 
 // Exposed for debugging from the Chrome console on the phone.
 window.JARVIS = {
-  app, state, setView, setActivity, setDock, setNav, setImmersive,
+  app, state, setView, setActivity, setNav, setImmersive,
   applyLanguage, applyAvatarMode,
 };

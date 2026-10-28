@@ -16,6 +16,7 @@ export default class Armory {
     this.form = document.getElementById('conn-form');
     this.addBtn = document.getElementById('btn-add-conn');
     this.connections = [];
+    this.presets = [];
     this.editing = null;
     this.addBtn?.addEventListener('click', () => this.openForm(null));
   }
@@ -24,6 +25,7 @@ export default class Armory {
     try {
       const data = await api.armory();
       this.connections = data.connections || [];
+      this.presets = data.presets || [];
     } catch {
       this.connections = [];
       toast(t('error.network'), 'error');
@@ -169,6 +171,34 @@ export default class Armory {
     const values = conn || { transport: 'stdio', name: '', command: '', url: '', cwd: '', env_keys: [], autoconnect: false };
 
     const nameField = field(t('armory.name'), input('text', values.name));
+
+    // The servers that ship with JARVIS, filled in from the real install path.
+    // Only offered for a new connection: tapping one while editing an existing
+    // server would quietly overwrite what the user came here to change.
+    let presetRow = null;
+    if (!conn && this.presets.length) {
+      presetRow = document.createElement('div');
+      presetRow.className = 'field preset-row';
+      const label = document.createElement('label');
+      label.textContent = t('armory.presets');
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.textContent = t('armory.presetsHint');
+      const buttons = document.createElement('div');
+      buttons.className = 'form-actions';
+      for (const preset of this.presets) {
+        const button = this._button(preset.name, 'btn-ghost', () => {
+          nameField.querySelector('input').value = preset.name;
+          transport.value = preset.transport || 'stdio';
+          commandInput.value = preset.command || '';
+          applyTransport();
+          toast(preset.summary || preset.name, 'info');
+        });
+        button.dataset.preset = preset.id;
+        buttons.appendChild(button);
+      }
+      presetRow.append(label, hint, buttons);
+    }
     const transport = document.createElement('select');
     for (const [value, key] of [['stdio', 'armory.transportStdio'], ['http', 'armory.transportHttp']]) {
       const option = document.createElement('option');
@@ -266,6 +296,7 @@ export default class Armory {
     });
     actions.append(cancel, save);
 
+    if (presetRow) this.form.appendChild(presetRow);
     this.form.append(nameField, transportField, commandField, cwdField, urlField, envField, secretWrap, autoRow, actions);
     this.form.hidden = false;
     if (this.list) this.list.hidden = true;

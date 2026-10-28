@@ -2,6 +2,918 @@
 
 ---
 
+# V4 Phase 2a — tools on every brain, and routing
+
+Picked up from the V4 plan where the previous session stopped: Phase 1 was
+committed, Phase 2 had not been started.
+
+## OpenAI and Claude can now use the Armory's tools
+
+Before this, `llm.supports_tools()` was true for Ollama only, so with OpenAI
+or Claude selected a connected MCP server was silently ignored and the model
+answered without it.
+
+* `openai_client.chat_stream_full()` streams a turn and stitches tool calls
+  back together from OpenAI's fragments — id and name first, then the JSON
+  arguments a few characters at a time, keyed by index.
+* `anthropic_client.chat_stream_full()` does the same for Claude's
+  `tool_use` blocks and their `input_json_delta` fragments.
+* Both return the one message shape the tool loop already reads, so
+  `toolchat.py` changed in two places only: every tool result now carries the
+  `tool_call_id` of the call it answers, and the loop is pinned to one
+  provider for the whole turn.
+* History translation: OpenAI gets the arguments back as a JSON string and
+  `role: tool` messages; Claude gets `tool_use` blocks on the assistant turn
+  and `tool_result` blocks in a user turn, with consecutive results merged
+  into one turn and failed or refused tools flagged `is_error`.
+* **Settings → AI Connections → Let paid brains use the Armory's tools**
+  (`cloud_tools_enabled`, default on). Each tool round is a separate billed
+  request, so it can be switched off.
+
+## Routing: Manual / Local / Cloud / Automatic
+
+A new card at the top of AI Connections, `llm_mode` in the config.
+
+| Mode | Who answers |
+|---|---|
+| Manual (default) | The connection marked *In use* — exactly the previous behaviour |
+| Local | Always Ollama |
+| Cloud | The picked provider if it is paid, else the first authorised one; Ollama if none is |
+| Automatic | Ollama when it is running **and** has its model; otherwise an authorised paid provider; otherwise Ollama, so the error is Ollama's |
+
+"Authorised" means all three deliberate steps: enabled, cost notice
+acknowledged, key stored. A stored key alone is not enough, so no mode can
+start billing an account the user did not set up for it.
+
+The card shows the backend's verdict, not the setting: "Next answer: Claude.
+Ollama cannot answer, so this turn goes to the cloud and is billed." The
+chat stream's `start` event carries `mode` and `route_reason` too. The
+automatic decision is cached for 15 seconds, and each chat turn is routed
+once and pinned, so a tool round started on Claude is never finished by
+Ollama.
+
+## Fixed on the way
+
+* EYES flagged a frame as billed only on OpenAI; Claude bills too.
+* Clearing a key compared against the *routed* provider; it now compares
+  against the one picked in settings.
+* The Ollama card claimed JARVIS "never leaves it for a paid provider on its
+  own"; with Automatic routing that needs qualifying, and now is, in all six
+  languages.
+
+## Verified
+
+`tools/test_cloud_tools.py`, 41 checks, against local stand-ins for both APIs
+that stream in the documented shapes and record what JARVIS sent: fragmented
+arguments are reassembled, both full tool rounds run the tool for real and
+build the answer from its output, replayed history is in each API's shape,
+the switch withholds tools, and every routing rule holds — including Ollama
+up but missing its model counting as down. All seven suites pass (362
+checks); the Phase 1 benchmark still shows 60 token events with tools
+connected. In Chromium at 412×915 and 360×800 the routing card renders in
+the interface language, saves the mode, shows the live reason, and nothing
+scrolls sideways.
+
+Service worker cache bumped to `jarvis-v4-5-routing`.
+
+---
+
+# V4 Phase 1d — one continuous background behind the collapsed panel
+
+The requirement: when the conversation slides away, what it uncovers must be
+the same cosmic background as the rest of the screen — no dark panel, no
+seam, no mismatched colour. Measuring that turned up two real defects that
+the earlier start-and-end checks could not see.
+
+## The slide was not sliding
+
+`.chat-panel`'s collapse transition was being **silently dropped**. The
+immersive-mode rule further down the stylesheet lists the panel among the
+elements that fade:
+
+```css
+.topbar, .rail, .dock, … , .chat-panel, .mode-row {
+  transition: opacity .18s ease, transform .18s ease;
+}
+```
+
+`transition` is not additive and that rule comes later, so `max-height` was
+never in the final declaration. The panel snapped shut in one frame. Measured
+mid-collapse, it was 18 px on the very first sample. The panel now has its own
+declaration carrying all three properties, and the same measurement reads
+**421 → 318 → 102 → 20 → 18**.
+
+## And it was animating over the wrong range
+
+The open state is `max-height: 2000px`, because a transition cannot start from
+`none`. The panel is only about 420 px tall, so collapsing animated 2000 → 22
+and *nothing moved* for the first two thirds of the slide. `setCollapsed()`
+now pins the start to the panel's measured height, so every millisecond of the
+transition is visible movement, then hands the panel back to the stylesheet so
+an open panel can still grow with the conversation.
+
+## The mask could go stale
+
+The particle field is drawn inside a clip that excludes the conversation and
+the chat bar, and those rectangles were refreshed by a `ResizeObserver`. An
+observer only fires on a **size** change — so an element that *moves* without
+resizing keeps a stale rectangle, and the particles get cut out of the wrong
+strip of screen. The chat bar does exactly that when the keyboard opens.
+
+The rectangles are now re-read four times a second, and every frame while
+anything is actually moving (detected by comparing readings, so a drag or a
+slide is tracked without wiring the backdrop to the panel). Two layout reads
+at 4 Hz, against the 120 Hz the original comment was rightly worried about.
+
+## Verified, by measurement rather than by eye
+
+With the panel collapsed, in the 199 px the conversation used to occupy:
+
+| Check | Result |
+|---|---|
+| Particles present | 2 449 lit pixels, **29.9 per 1 000** against **27.9** in the band above |
+| Anything painting there | **none** — no background, image or border from any element |
+| A visible seam | sharpest row-to-row brightness change **1.25 levels** (a panel edge jumps by tens) |
+| Colour match | mean brightness **10.4** in the freed area vs **10.1** above |
+| Mid-slide | panel 421 → 318 → 102 → 20 → 18, particles under it 46 → 392 → 685 as it clears |
+| Input bar | y unchanged, input and Send still visible |
+
+The seam scan decodes the screenshot inside Chromium rather than adding a PNG
+library, so the project stays dependency-free.
+
+One note on the method: the first version of the "is anything painting there"
+check reported three elements, and all three were false positives — it ignored
+horizontal overlap (the nav drawer is slid off to the side), opacity inherited
+from a parent, and clipping by an ancestor's `overflow: hidden`. It now walks
+the ancestors for effective opacity and intersects with every clipping box.
+A check that reports things which are not on screen is worth nothing as a
+regression test.
+
+---
+
+# V4 Phase 1c — three interface changes
+
+## The clock is amber
+
+`--hud-amber: #ffd60a` for the time, `--hud-amber-dim: #f7c948` for the line
+below it, both with a warm glow. The weekday, day and month share one element
+(`#hud-date`), so one rule covers all three. About 13:1 against the page
+background — readable at a glance, and it now reads as an instrument rather
+than as more chrome. Position, size and the ticking seconds are unchanged.
+
+## The black rectangle behind the rings
+
+Worth being precise about, because the answer was not where it was expected.
+
+**The rings container was already transparent.** Measured in the running app:
+`#stage` and both canvases compute to `rgba(0, 0, 0, 0)`, `rings.js` only ever
+calls `clearRect`, and the particle field draws *more* densely inside the dial
+than below it (2 509 lit pixels in the stage square). The box removed in
+`766c3dd` has not come back.
+
+What *is* a solid near-black rectangle over the rings is **the standby veil**.
+`.standby-veil` is `position: absolute; inset: 0` inside `#stage`, filled with
+a flat `rgba(2, 8, 14, .9)` — a 275×275 opaque box sitting exactly where the
+rings are, shown whenever JARVIS is in standby. It is the only element in the
+stage that has ever painted one.
+
+It is now a radial fade with a matching mask: dark enough at the centre to
+read the STANDBY notice, transparent at the corners, so the particle field
+shows through and the dial never reads as a rectangle. The notice, the Resume
+button and the blur all behave as before.
+
+A test now asserts that **nothing** inside `#stage` computes a background with
+alpha above 0.05, in both active and standby, so this cannot quietly return.
+
+If a black box is still on screen after this update, it is a stale cached
+build rather than a style: the service worker cache is bumped to
+`jarvis-v4-3-ui`, and an installed PWA may need to be closed completely (not
+just backgrounded) before the new shell is picked up.
+
+## The conversation collapses
+
+A grip sits at the top of the conversation panel. Drag it down and the panel
+slides away; drag up, or tap it, and it comes back.
+
+- **The input bar cannot move.** `.dock` is a sibling of the workspace, not a
+  child of the panel, so collapsing the panel does not touch it. Verified: the
+  dock's y is identical before and after (868 px both times) and both the
+  input and Send stay visible.
+- **Scrolling still works.** A drag that starts inside the message list is
+  only treated as a collapse when the list is already scrolled to the top and
+  the finger is moving down. Mid-conversation, a swipe scrolls and the panel
+  does not move — verified with a 40-message list at `scrollTop 1454`.
+- **Pointer events, not touch events**, so one code path serves a finger on
+  Android and a mouse on a desktop. The grip carries `touch-action: none`;
+  without it Android claims the vertical drag for a page pan before the panel
+  sees it.
+- The drag follows the finger, and a release under 44 px snaps back — a wobble
+  is not a command.
+- Collapsed, the console band centres in the freed space: the dial moves from
+  y 103 to y 305 rather than leaving a hole at the bottom.
+- Sending a message reopens the panel, so a reply never streams into a closed
+  drawer.
+- The state is remembered per device in `localStorage`, wrapped in try/catch
+  so private mode cannot break the panel.
+- `prefers-reduced-motion` turns the slide off.
+
+## Verified
+
+In the running app at 412×915 with touch emulation, driving real
+`PointerEvent`s with `pointerType: 'touch'`:
+
+| | Result |
+|---|---|
+| Clock colour | time `rgb(255, 214, 10)`, date `rgb(247, 201, 72)`, seconds still ticking |
+| Nothing opaque in the stage | zero elements with background alpha > 0.05 |
+| Particles behind the rings | 2 509 lit pixels inside the dial |
+| Standby | radial fade plus mask, not a flat fill |
+| Swipe down | panel 421 px → 18 px, state `collapsed` |
+| Input bar | y 868 → 868, input and Send still visible |
+| Swipe up | back to 421 px, state `open` |
+| Tap the grip | collapses, and tapping again reopens |
+| Swipe mid-scroll | `scrollTop` unchanged at 1454, panel stays open |
+| Swipe from the top of the list | collapses |
+| Send while collapsed | reopens |
+| V3 layout | dial 275 px, RINGS/FACE bar matching, four shortcuts, no page scroll |
+
+All five Python suites still pass (249 checks), as do the voice and
+streaming browser suites.
+
+**Not verified: a real finger on a real Galaxy.** The gestures are driven by
+synthesised pointer events in a touch-emulated Chromium, which exercises the
+same handlers Android does but not Android's own scroll arbitration. Flick
+momentum and the interaction with the system back-gesture at the screen edge
+have to be felt on the phone.
+
+---
+
+# V4 Phase 1b — the voice system
+
+Four symptoms were reported. They had three causes, and the most important
+one explains the strangest symptom.
+
+## Why JARVIS spoke in a female voice that could not be changed
+
+The only installed Romanian voice is **Mihai, who is male**. So the female
+voice being heard was never JARVIS's — it was Android's own.
+
+`voice.js` used to call `_browserFallback()` automatically whenever backend
+speech failed, and said nothing when it worked. Android then picked its own
+Romanian voice, which on a Galaxy is female. No setting could change it,
+because no setting in JARVIS controlled it.
+
+The device voice is now **off by default** (`tts_browser_fallback`), and when
+it is switched on and used, a notice names the voice and says it is the
+device's, not JARVIS's. A backend failure is now explained in the words the
+backend used — *"no voice of that gender is installed for this language;
+available: male"* — instead of a flat "voice unavailable".
+
+## Why Mihai and Alan showed as "Not installed"
+
+The scan looked only at the **top level** of the voices folder and insisted on
+exactly `<id>.onnx` + `<id>.onnx.json`. Three realistic layouts were therefore
+invisible, which was verified by planting each one on disk:
+
+| On disk | Before | Now |
+|---|---|---|
+| `ro_RO-mihai-medium.onnx` (flat) | found | found |
+| `en/en_GB/alan/medium/en_GB-alan-medium.onnx` (as HuggingFace delivers it) | **invisible** | found |
+| config named `<id>.json` instead of `<id>.onnx.json` | **invisible** | found |
+| `.ONNX` from a manual copy | **invisible** | found |
+
+The nested form is exactly what a HuggingFace download produces, which is why
+Alan in particular went missing. The scan is now recursive, accepts either
+config name, and is case-insensitive on the extension. A voice found anywhere
+under the folder is used from where it actually is.
+
+There is also a new **"Voices on this device"** section in Settings listing
+the search folder, every voice found with its real path and size, and any
+model skipped for a missing config. A voice reported missing that is in fact
+installed cannot be diagnosed from a phone without that.
+
+## Why the engine showed "—"
+
+`settings.refresh()` set `this.voices = null` on *any* failed request, and the
+engine line then rendered a bare dash. One slow request was enough to make a
+working install look absent — the "sometimes" in the report. The last good
+reading is now kept, the dash is gone, and the line always says something
+real: the engine and version, or why it could not be checked, or that the
+reading is stale.
+
+## Male / Female
+
+Every catalogue entry already carried a `gender`; nothing exposed it. There is
+now a gender selector per language, and it **only offers genders that are
+actually installed**. Where a language has just one, it says so — *"only male
+available offline"* for Romanian — rather than offering a choice that cannot
+be honoured. Asking for a gender with no installed voice returns
+`gender_unavailable` and names what is available; it is never answered with
+the other gender.
+
+A voice kept from an older install is recognised by its speaker name, so a
+legacy `en_US-alan-medium` is still Alan and still male, and selectable.
+
+**Romanian is male-only offline.** Piper publishes no female Romanian voice
+that this project has verified, and the Piper index is unreachable from the
+build machine, so none was added — a download button that 404s would be worse
+than an honest message.
+
+## Preview, and a slower slider
+
+Each installed voice has a **Preview** button that speaks a sample in that
+voice at the rate currently on the slider, before it is saved. If it fails it
+says which voice failed and why, and does not fall back to another.
+
+The speed slider was 0.6–1.6 in steps of 0.1. It is now **0.4–1.6 in steps of
+0.05**, with the value shown (`0.45×`) and marked *slow* at the bottom end.
+The backend floor moved from 0.5 to 0.3 so the slider's range is real rather
+than clamped away.
+
+## Verified
+
+`python3 tools/test_voices.py` — 53 checks, no models or sherpa-onnx needed:
+all four on-disk layouts, a model with no config rejected *and reported*, path
+traversal refused, gender resolution including the Romanian refusal, legacy
+id recognition, clamping of bad speeds and genders, and settings surviving a
+cache drop.
+
+In the running app (Playwright, 412×915), with Mihai planted flat, Alan
+planted **nested** and Amy flat:
+
+- Romanian row: `Any / Male`, no female option, *"only male available
+  offline"*, Mihai listed and marked installed;
+- English row: `Any / Male / Female`, **Alan listed** despite being nested;
+- preview buttons on both installed rows;
+- slider reports `min 0.4, step 0.05`, readout `1.00×`;
+- engine line reads *"sherpa-onnx: not importable: No module named
+  'sherpa_onnx' · Install with: pip install sherpa-onnx==1.13.8"* — correct
+  for this container and actionable;
+- choosing Female for English and 0.45× speed **survived a page reload**;
+- V3 interface untouched: dial 275 px, RINGS/FACE bar matching, clock
+  running, four shortcuts, no page scroll.
+
+**Not verified: audio actually coming out.** There is no sherpa-onnx and no
+63 MB voice model on the build machine, so no sound was produced here —
+every voice in the tests is a few zero bytes named like a model, which tests
+detection and refusal but not synthesis. The preview button, the 0.4× rate
+and Mihai's and Alan's real voices have to be heard on the phone. What the
+tests do guarantee is that if synthesis fails there, JARVIS will say so
+rather than quietly speaking in Android's voice.
+
+---
+
+# V4 Phase 1 — speed
+
+The complaint was that local answers appear very slowly. Three causes were
+found in the code, not guessed at, and the first one is most of it.
+
+## The tool loop did not stream at all
+
+`toolchat.run()` called `llm.chat_once_full()`, which is non-streaming,
+because the loop needs `tool_calls` intact and a streamed turn delivers them
+in pieces. So with **any** MCP server connected, the whole answer was withheld
+until generation finished. That is why chat got dramatically slower the moment
+a tool server was added — the thing the user noticed.
+
+`ollama.chat_stream_full()` now does both: it yields tokens as they arrive and
+assembles the complete message, tool calls included, from the same stream.
+
+Measured with `tools/bench_chat.py`, against a stub that emits tokens on a
+fixed schedule (300 ms to first token, 8 ms per token, 60 tokens — so the
+floor is ttft 0.300 s):
+
+| | ttft before | ttft after | token events before | after |
+|---|---|---|---|---|
+| plain chat | 0.344 s | 0.332 s | 60 | 60 |
+| **with an MCP server connected** | **0.820 s** | **0.346 s** | **1** | **60** |
+
+0.820 s was the entire generation time: one lump, at the end. The harness's
+own share is now 33–46 ms on both paths. On a phone where a 3B model generates
+for twenty seconds, this is the difference between a blank screen for twenty
+seconds and the first words inside a second.
+
+## The model was being unloaded between messages
+
+No `keep_alive` was ever sent, so Ollama unloads after about five minutes idle
+and the next message pays a multi-gigabyte reload before its first token. Now
+sent on every request, default `30m`, configurable.
+
+## No request tuning, and a window that could not see length
+
+`num_ctx` and `num_predict` are now settable (0 and -1 mean "leave it alone",
+so nothing changes until the user opts in), and history has a second brake:
+`chat_char_budget`, default 6000 characters. A message count cannot tell
+twenty short turns from twenty long ones, and the model re-reads all of it
+every turn.
+
+## Timings, visible
+
+Each answer now carries a quiet line underneath: *first word 0.4s · 3.2s
+total*. Two numbers because they mean different things — a long time to the
+first word with a quick finish is the model loading or thinking, the reverse
+would be JARVIS getting in the way.
+
+## Transcript ordering
+
+Because text now streams during tool rounds, a turn can produce several runs
+of text around a tool card. Each run is its own bubble, in the order things
+happened, instead of text being moved around a card that arrived after it.
+
+## Not a cause
+
+Voice was checked and left alone: speech already starts when the text is
+complete, which is correct for a single TTS request.
+
+## What was measured, and what was not
+
+There is no Ollama on the build machine, so the *model's* generation speed
+could not be measured and the table above is JARVIS's own overhead against a
+constant-rate stub. That is the number these changes move. Real end-to-end
+timings have to come from the phone — which is what the per-answer readout is
+for.
+
+Verified in the running app (Playwright, 412×915): the answer text grows in
+9 observable steps with first paint at 215 ms, the timing line appears,
+`list_directory` still runs for real and its output still reaches the answer,
+and the V3 interface is untouched — dial 275 px, RINGS/FACE bar matching,
+clock running, all four shortcuts present, no page scroll.
+
+---
+
+# V3.6 — internet research
+
+JARVIS can now search the web, read public pages and answer with the links it
+took the answer from. It rides the tool loop added in V3.5, so there is no
+second code path: the research tools are an MCP server like any other.
+
+## `tools/web_mcp_server.py` — "JARVIS Web"
+
+Stdio MCP, stdlib only, four tools:
+
+| tool | what it does | approval |
+|---|---|---|
+| `web_search` | DuckDuckGo (or your own SearXNG), returns title + URL + snippet | no |
+| `wikipedia` | article extracts with their URLs | no |
+| `fetch_url` | reads one public page as text | no |
+| `download_file` | saves a file to `~/jarvis-downloads` | **yes** |
+
+Add it in **Tool Armory → Add → JARVIS Web**. The preset fills in the command
+with your real install path, so there is nothing to type.
+
+To use your own search instance instead of DuckDuckGo, set
+`JARVIS_SEARXNG_URL=https://your-instance` before starting JARVIS.
+
+## The address guard
+
+This is the part worth reading. The model chooses the URL, so `fetch_url` is a
+confused deputy waiting to happen — "read `http://127.0.0.1:8787/api/config`"
+would hand it your own settings, and `http://192.168.1.1/` would reach your
+router. So every hostname is resolved, and **every address it resolves to** is
+checked before the socket is opened:
+
+- loopback, private, link-local (where cloud metadata lives), multicast,
+  reserved, unspecified and carrier-grade NAT ranges are all refused;
+- `http` and `https` only — no `file://`, no `ftp://`;
+- redirects are followed by hand, up to five hops, and **each hop is checked
+  again**, because a public host is free to redirect to `127.0.0.1`;
+- a response is capped at 2 MB and the extracted text at 20 000 characters.
+
+A refusal says which address it was and why. Verified: asking it to read
+JARVIS's own API over loopback is refused, as is a public page that redirects
+into a private network.
+
+## Sources in the answer
+
+A model handed a search tool will cheerfully answer from memory and cite
+nothing. When the catalogue contains a tool that can reach the web,
+`toolchat` appends an instruction to the system message: search rather than
+recall for anything that may have changed, and list the URLs under
+`Sources:`. With no web tool connected, nothing is added.
+
+## Read-only, honestly decided
+
+`web_search` reads, but "web" is not a read verb, so the V3.5 name heuristic
+would have held it behind an approval prompt forever. Tool names now carry the
+MCP spec's `annotations`, and `toolchat.is_mutating()` consults them — but not
+blindly, because the spec is explicit that annotations may not describe a tool
+faithfully:
+
+- a write verb anywhere in the name wins over any annotation, so a server
+  claiming `delete_everything` is `readOnlyHint: true` is not believed;
+- `destructiveHint` or `readOnlyHint: false` always means approval;
+- `readOnlyHint: true` is taken only when the name itself says nothing either
+  way — which is exactly the `web_search` case.
+
+## A failed call no longer reads as a success
+
+An MCP server that answers with `isError` used to produce a green "ran in
+240ms" card with the error message inside it. Network failures are routine for
+a web tool, so `execute()` now reports `ran: false` for those, and the card
+shows them as not-run.
+
+## What was *not* verified here
+
+The live search engines are unreachable from the machine this was built on —
+its egress proxy answers 403 to `CONNECT` for `html.duckduckgo.com`,
+`lite.duckduckgo.com`, `api.duckduckgo.com`, `en.wikipedia.org` and the
+SearXNG instance tried. So **no live search was run**.
+
+What *was* run: `tools/test_websearch.py` (88 checks) against a local fixture
+serving the exact shapes DuckDuckGo, SearXNG and the Wikipedia API return —
+result parsing, redirect unwrapping, HTML-to-text, size caps, the address
+guard unpatched, redirect re-checking, filename sanitising and a real file
+written to disk. Plus the real stdio handshake, and the browser suite driving
+the Armory UI: preset → save → connect → catalogue → loopback refusal.
+
+The first live search is therefore yours to make. On the phone:
+
+```
+JARVIS → Tool Armory → Add → JARVIS Web → Save → Connect
+then ask: "search the web for the current Ollama release and give me the link"
+```
+
+If DuckDuckGo changes its HTML, `web_search` returns "No results" rather than
+wrong ones, and `_DDG_LINK` / `_DDG_SNIPPET` in `tools/web_mcp_server.py` are
+the two lines to adjust.
+
+---
+
+# V3.5 — MCP tools the model can actually use
+
+The Armory could already connect to an MCP server, list its tools and call
+them. Nothing joined that to the conversation: `ollama.chat_stream()` never
+sent a `tools` field, so the model was never told the tools existed, and
+nothing watched its replies for a request to use one. The server connected,
+and chat could do nothing with it.
+
+## The loop
+
+`server/toolchat.py` is the join:
+
+1. gather the tools every **connected** server exposes;
+2. ask the model, handing it those tools;
+3. if it asked for one, run it through `armory.call_tool` and append the
+   result as a `tool` message;
+4. back to 2, up to six rounds.
+
+`ollama.chat_full()` is new: one non-streamed turn returning the whole
+assistant message. The loop needs `tool_calls` intact, and a streamed turn
+hands those back in pieces whose assembly differs between Ollama versions.
+
+**Nothing about the old path changed.** With no connected server, or on a
+provider that cannot take tools, chat streams exactly as before.
+
+## Never claiming a tool ran
+
+Every `tool_result` carries what `armory.call_tool` actually returned — its
+failures included. A tool that was refused, errored, or hit a disconnected
+server says so in the transcript *the model reads*, so the model cannot report
+success over a failure it was told about. The interface shows a card per call:
+blue while running, green with the elapsed time when it ran, red and "did not
+run" when it did not, with the real output underneath.
+
+## Writes wait for you
+
+Tools are classified read-only or mutating by their verb, and **an unknown
+verb counts as mutating** — a read wrongly held is an inconvenience, a write
+wrongly allowed is not. A mutating call does not run. It raises an approval
+bound to that exact tool and those exact arguments, consumed the first time it
+is used, so an approval for one path cannot be spent on another.
+
+## New: a real filesystem server
+
+`tools/fs_mcp_server.py` — "JARVIS Files", stdio, dependency-free, confined to
+one root that `..` cannot escape. Tools: `list_directory`, `read_file`,
+`get_file_info` (read-only), `write_file`, `create_directory` (mutating).
+
+```
+name:      JARVIS Files
+transport: stdio
+command:   python3 ~/jarvis-v2/tools/fs_mcp_server.py ~/projects
+```
+
+## Tested for real
+
+`tools/test_toolcall.py` — 27 checks. The MCP server, the stdio handshake,
+`tools/list`, `tools/call`, the catalogue, the parsing, the execution and the
+result fed back are all real. The *model* is stubbed, because there is no
+Ollama in a test environment — and the stub reads the tool output back, so a
+check claiming a directory listing arrived only passes if it did.
+
+Verified through the browser as well: asking for `list_directory` produced a
+green card holding the real contents of the directory, and an answer quoting
+them. Asking for `write_file` produced a red "did not run" card, an approval
+control, and **no file on disk**; after approving, the same request wrote
+`notes/new.txt` with the right contents — confirmed on the filesystem.
+
+---
+
+# V3.4 — no box behind the rings
+
+The dial sat on a soft disc of radius `R * 1.25`. The canvas's half-size is
+`R * 1.087`, so that disc was **wider than the canvas it was drawn into** and
+got clipped by the square edge: visible along the four sides, absent at the
+corners, which is exactly the shape of a box. On a phone's OLED, in the dark,
+a two-level step along a straight edge is plainly a rectangle.
+
+`.stage` carried a second backing layer of its own — a radial gradient behind
+the canvas. It was not being clipped, but it was still a panel the rings were
+floating on rather than part of the interface.
+
+Both are gone. The rings now sit straight on the interface background, so the
+ambient particle field runs right through where the box used to be.
+
+**The ring design is untouched.** All eight layers are exactly as they were —
+tick crown, segment ring, graduation ring, orbit, sweep, dashed ring, the two
+3D gyro rings, and the reactive core with its centre label. The core's own
+glow stays, which is what keeps the middle of the dial holographic; what went
+was only the wash *behind* the whole thing.
+
+**Verified by pixel sampling.** Strips crossing the stage's left and bottom
+edges, with the motes and the dial frozen so nothing else could vary, read
+flat across the boundary: maximum step between neighbouring pixels is **1**,
+which is the page's own gradient. Before, the boundary was a visible step.
+
+---
+
+# V3.3 — one background for both visualisers
+
+FACE used to paint its own background: a full-canvas volumetric wash behind
+the bust, plus its own field of motes drifting through the head's volume.
+RINGS painted neither — it cleared its canvas and drew the dial, letting the
+stage's own gradient and the ambient particle field show through. Switching
+mode therefore changed the backdrop as well as the visualiser.
+
+Both are now gone from `face3d.js`:
+
+* the `WASH` program, its shaders, its buffer and the `_wash()` pass;
+* the GL particle buffers and their draw call.
+
+The irises stay — they are part of the face, not of the background — and so
+does everything else: the scan band, the interference, the depth tint, the
+mesh overlay, the jaw and the lids.
+
+What remains behind the visualiser is identical in both modes: the page
+gradient, the ambient particle field, and the stage's own radial. Switching
+RINGS ↔ FACE now swaps one canvas for the other and changes nothing else.
+
+**Verified by pixel comparison.** With the visualiser canvas hidden, a region
+strictly inside the stage and clear of the mode label, the hologram card and
+the control rail is **byte-identical** between the two modes — diff bounding
+box `None`, maximum channel delta `0`.
+
+The file is ~1.7KB smaller and FACE is two draw calls lighter per frame.
+
+---
+
+# V3.2 — depth in the particle field, status in the border
+
+## Thousands of motes, with depth
+
+The field is now ~2,200 motes on a Galaxy S25 Ultra across five depth bands.
+Depth is assigned once and never changes — nothing moves toward or away from
+the viewer — and it sets three things at once: size, brightness and drift
+speed. Near motes measure 1.24px and travel at 4.47px/s; far ones 0.44px at
+1.24px/s. That difference is the parallax that makes a flat canvas read as a
+volume.
+
+They still wander: each mote has its own heading and a slow turn rate, so the
+field has no preferred direction. No streams, no falling, no forward motion.
+
+Cost is unchanged at **0.10 ms/frame** despite 2.5x the count, because the two
+farthest bands draw as squares rather than circles — under a pixel the two are
+indistinguishable and a rect is much cheaper to path — and the whole field is
+five `Path2D` fills rather than thousands of draw calls.
+
+## Never inside the conversation
+
+The backdrop is drawn inside an even-odd clip that cuts out the chat panel and
+the chat bar, so not one mote is painted under them. Verified by reading the
+canvas back: **0 lit pixels** inside the panel, 3,267 in a strip outside it.
+Clipping rather than clearing afterwards also saves the fill.
+
+The masked rectangles are cached and refreshed by a `ResizeObserver` rather
+than measured every frame — reading a layout box 120 times a second is how an
+ambient layer becomes a janky one.
+
+## The border reports what JARVIS is doing
+
+| State | Border |
+|---|---|
+| Listening, thinking, speaking | **green** |
+| Standing by, or in standby | **red** |
+
+The travelling animation is unchanged; only the colour switches. It is driven
+from `applyEdgeState()`, which reads the same two pieces of state the activity
+pill does, from the same place — so the border and the pill cannot disagree.
+Standby wins over a lingering activity.
+
+---
+
+# V3.0 — shortcuts, a clock, and ambient light
+
+This branch also carries V2.8 (AI Connections), which was built on `main`
+while the console layout sat on its own branch. The two were merged here so
+there is one branch with everything rather than two that each lack half.
+
+## Four shortcuts on the top bar
+
+OpenAI (chatgpt.com) and GitHub are fixed; the other two are yours, named and
+pointed from **Settings → Top-bar shortcuts**. They are real `<a
+target="_blank" rel="noopener noreferrer">` links, so Android Chrome treats
+them as an ordinary navigation and a long press offers its usual menu. An
+unconfigured slot shows a `+` and opens Settings — never a dead button.
+
+Addresses are validated on the backend: anything that is not `http://` or
+`https://` is dropped, the slot stays a `+`, and the interface says so. A
+`javascript:` URL in the field is refused rather than rendered as a link.
+
+They sit on the header's **second line**. The first line is already full at
+412px — menu, brand, activity, full screen, settings — and squeezing four more
+controls in would have meant shrinking the brand or the activity pill, which
+is a redesign and not what was asked for.
+
+## A clock above the rings
+
+24-hour `HH:MM:SS` with the date beneath, fixed to **Europe/London** rather
+than the phone's own zone, so it stays right wherever the phone is and follows
+British summer time by itself. It ticks on a timer re-aligned to each whole
+second instead of every 1000ms from an arbitrary start, so the seconds change
+when the second changes.
+
+It sits in grid column 2 at the top of the console band — the dial's own axis,
+in space the band already had. The rings keep their size and their position to
+the pixel, and nothing below moves.
+
+## Ambient light, in every mode
+
+- **Suspended particles.** ~900 motes on a Galaxy S25 Ultra, each wandering on
+  its own slowly turning heading. They do not fall and they do not stream:
+  measured over 1.2s the field's mean displacement is a fraction of a pixel in
+  both axes while each mote travels ~4px. One batched `Path2D` and three fills
+  per frame rather than a thousand draw calls — **measured cost 0.10 ms/frame**.
+  They shed with the dial's existing frame-time watchdog, so a slow phone
+  drops to ~270 motes on its own.
+- **A travelling edge pulse.** A thin neon arc running the outer edge, as an
+  SVG stroke with `pathLength="1000"` and a CSS `stroke-dashoffset` animation:
+  one composited element, no JavaScript per frame, and one dash pattern that
+  works at every screen size without measuring anything.
+
+The conversation panel is untouched — same background in every mode.
+
+## The cinematic scene, full screen only
+
+A nebula wash and a hooded figure, drawn onto the same canvas and only while
+full screen is on. It is drawn, not photographed: the brief asked for a face
+that is not clearly visible and a silhouette has none at all, nothing has to
+be licensed or cached, and it can be tinted to JARVIS's own cyan rather than
+graded towards it. A scrim over the whole thing keeps the rings, the rails and
+the text readable.
+
+---
+
+# V2.8 — AI Connections, and a full-screen button
+
+## A new AI CONNECTIONS section in the menu
+
+Three brains in one panel, in the order of what they cost you.
+
+| | Free | Key | Cost gate | Test |
+|---|---|---|---|---|
+| **Ollama** | yes, local and offline | — | — | yes |
+| **OpenAI** | no | backend only | yes | yes |
+| **Claude** | no | backend only | yes | yes |
+
+Ollama stays the default and the fallback. Neither paid provider can become
+the active brain until it is **switched on** *and* its **cost notice is
+acknowledged** — and that is enforced in `config._clamp_v21()`, so a
+hand-edited `config.json` or a POST that skipped the interface still cannot
+start spending. The notice carries the real per-million-token prices.
+
+Keys go to `~/.jarvis/secrets.json` (mode 600) on the Termux backend. There is
+no GET for them, here or anywhere: the browser is told whether a key exists,
+never what it is. `tools/test_connections.py` asserts the key is absent from
+the settings document, the status payload and every error string.
+
+`server/anthropic_client.py` is the new Claude client — the Messages API over
+`urllib`, so Termux still needs no `pip install`. The project takes no pip
+dependencies at all, which is why the official `anthropic` SDK is not used.
+
+## Claude Code — a real bridge, or an honest "no"
+
+JARVIS does not reimplement Claude Code. It looks for the `claude` binary and
+drives it headlessly, behind an approval gate:
+
+1. **Propose.** JARVIS records a request and returns the exact argument
+   vector. Nothing runs.
+2. **Review.** The panel shows that command verbatim, and the directory.
+3. **Approve.** Only then does a process start.
+
+Plan mode is the default and passes `--permission-mode plan --restricted`: it
+cannot write, run commands or deploy. Edits need a settings switch *and* a
+per-request confirmation, and run under `acceptEdits`.
+`--dangerously-skip-permissions` is never passed. Requests cannot reach
+outside the one configured working directory, and JARVIS never touches Claude
+Code's credentials — `claude` signs in on its own.
+
+**Android is not an Anthropic-supported platform for Claude Code.** Where the
+binary is missing or will not execute, the card says so with the real reason
+and offers no switch. See LIMITATIONS.md.
+
+## FULL SCREEN
+
+A compact button at the top of the interface hands the whole screen to JARVIS
+through the Fullscreen API. It hides itself once full screen; a tap anywhere
+brings back an EXIT pill for a few seconds. Where the browser has no
+Fullscreen API the button is hidden and a message explains why, rather than a
+control that silently does nothing. This is separate from immersive mode —
+they compose, and neither switches the other on.
+
+---
+
+# V2.7 — tightening the console
+
+Layout refinements only; nothing else moved.
+
+* **The dial is centred between the rails, not on the band.** It used to be
+  centred on the whole console, and because the control rail is wider than
+  the status rail that put it visibly right of the space it sits in. Its axis
+  is now the axis of the clear span, which moves it left by half the
+  difference between the two rail widths.
+* **RINGS / FACE moved out of the control rail** and into a row of its own
+  directly under the dial, exactly as wide as it and on the same axis. The
+  bottom row belongs to it alone, so neither rail can cover its ends.
+* **The empty band under the rings is gone.** The dial is sized from the
+  hologram and the rail above it, so what is left under it is the toggle and
+  a 5px margin rather than ~50px of background.
+* **The hologram took the space the toggle left**, growing from 92px to
+  119px on a Galaxy S25 Ultra — the right column now has no dead height.
+
+The dial's width is the clear span between the rails plus a 28px bleed each
+side, capped by the height of the hologram and rail together. The bleed is
+what keeps the rings reading as continuous behind the translucent rails
+without the rails landing on their labels; the cap is what leaves no gap.
+
+## One subtlety worth recording
+
+The console's sizes are derived with `calc()` from `--rail-row` and
+`--avatar-h`. Those derived properties are declared on `.app`, not on
+`:root`, because a custom property is resolved on the element that declares
+it: deriving them at the root would freeze them against the root's inputs and
+the keyboard and short-screen overrides would silently do nothing. That is
+exactly what happened on the first attempt — the conversation stayed at 103px
+with the keyboard up until the declarations moved down one level. It now gets
+281px on an S25 Ultra and 166px on a 360×800 phone, better than before this
+change rather than worse.
+
+---
+
+# V2.6 — console and conversation
+
+The home screen is now two things: an instrument band at the top and the
+conversation under it. UI only — no backend file is touched.
+
+| # | Asked for | What it is |
+|---|-----------|------------|
+| 1 | Avatar smaller, upper-right | A 64–92px panel in the console's top-right corner, on its own WebGL surface |
+| 2 | Rings larger, higher, centred | 284px on a Galaxy S25 Ultra (was 229px), centred on the screen's axis and sitting under both rails |
+| 3 | Status indicators down the left | SERVER, OLLAMA (the active brain), VOICE, TOOLS, VISION, stacked |
+| 4 | Controls down the right | RINGS/FACE, MUTE, ACTIVE, EYES, WATCH, HOLO, FOCUS, REFLEX — eight 26px rows, none wider than a third of the screen |
+| 5 | A large conversation panel | Always open, 482px on an S25 Ultra: eight messages at once, momentum scrolling |
+| 6 | Only the chat bar at the bottom | The dock is the composer and nothing else — grip, header and ticker are gone |
+
+## The dial runs behind the rails
+
+A three-column band on a 412px screen cannot both centre a larger dial and
+keep it clear of the rails. The rails are therefore translucent
+(`--rail-fill`) and the dial is laid across the whole console and centred in
+it, so the rings read as continuous behind the controls — as in the
+reference — instead of being chopped off by a solid edge.
+
+## Reading a long answer
+
+The message list follows a streaming answer only while you are already at the
+bottom of it. Scroll up to re-read and the stream no longer yanks you back;
+sending the next message opts you back in.
+
+## Typing
+
+While the keyboard is up the hologram gives its corner back and the control
+rail moves up into it, so the conversation keeps 257px rather than 162px on
+an S25 Ultra (142px rather than 58px on a 360×800 phone). Both kinds of
+Android are covered: the viewport-shrinking kind through a media query, the
+older kind through the `--kb` measurement the app already made.
+
+## One bug fixed on the way
+
+Immersive mode came up as a black screen. The dial is now a grid item centred
+in its area, and Chromium shrink-to-fits a `position: fixed` box that carries
+a self-alignment other than `stretch` — with absolutely positioned children
+that meant a 0×0 stage. The immersive rule resets `place-self` as well.
+
+---
+
 # V2.5 — the annotated reference layout
 
 The home screen is now stacked in the order of the annotated reference, top

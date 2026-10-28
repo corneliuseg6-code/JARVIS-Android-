@@ -76,13 +76,38 @@ export const api = {
   llmModels: () => request('/api/llm/models', { timeout: 15000 }),
   llmSetKey: (key, provider = 'openai') =>
     request('/api/llm/key', { method: 'POST', body: { provider, key } }),
-  llmClearKey: () => request('/api/llm/key', { method: 'DELETE' }),
+  llmClearKey: (provider = 'openai') =>
+    request('/api/llm/key?provider=' + encodeURIComponent(provider), { method: 'DELETE' }),
+  llmConnections: () => request('/api/llm/connections', { timeout: 20000 }),
+  llmTest: (provider) =>
+    request('/api/llm/test', { method: 'POST', body: { provider }, timeout: 25000 }),
+
+  // Claude Code. Nothing runs until codeApprove() is called with the id of a
+  // request the user has seen in full.
+  codeStatus: () => request('/api/code/status', { timeout: 15000 }),
+  codeRequests: () => request('/api/code/requests'),
+  codePropose: (prompt, directory, mode) =>
+    request('/api/code/request', { method: 'POST', body: { prompt, directory, mode } }),
+  codeApprove: (id, allowEdits = false) =>
+    request('/api/code/approve', { method: 'POST', body: { id, allow_edits: allowEdits } }),
+  codeCancel: (id) => request('/api/code/cancel', { method: 'POST', body: { id } }),
+
+  // MCP tools in chat.
+  chatTools: () => request('/api/chat/tools', { timeout: 15000 }),
+  chatToolApprove: (id, approve = true) =>
+    request('/api/chat/tools/approve', { method: 'POST', body: { id, approve } }),
 
   voices: () => request('/api/voices'),
   downloadVoice: (voice) => request('/api/voices/download', { method: 'POST', body: { voice, confirm: true } }),
   downloadStatus: (voice) => request('/api/voices/download/' + encodeURIComponent(voice)),
   tts: (text, language) =>
     request('/api/tts', { method: 'POST', body: { text, language }, raw: true, timeout: 60000 }),
+  // A preview names the voice and rate outright, so what is heard is what is
+  // about to be saved rather than whatever is configured now.
+  ttsPreview: (text, language, voice, speed) =>
+    request('/api/tts', {
+      method: 'POST', body: { text, language, voice, speed }, raw: true, timeout: 60000,
+    }),
 
   conversations: () => request('/api/conversations'),
   conversation: (id) => request('/api/conversations/' + encodeURIComponent(id)),
@@ -176,4 +201,10 @@ function dispatch(frame, handlers) {
   else if (event === 'token') handlers.onToken?.(data.text || '');
   else if (event === 'error') handlers.onError?.(data);
   else if (event === 'done') handlers.onDone?.(data);
+  // MCP tool activity. The interface shows these as they happen, so what the
+  // model says it did can be checked against what actually ran.
+  else if (event === 'tools') handlers.onTools?.(data);
+  else if (event === 'tool_call') handlers.onToolCall?.(data);
+  else if (event === 'tool_result') handlers.onToolResult?.(data);
+  else if (event === 'tool_approval') handlers.onToolApproval?.(data);
 }

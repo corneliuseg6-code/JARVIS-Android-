@@ -5,6 +5,7 @@ secrets.json -> API keys / tokens. Readable only by the backend, chmod 0600,
                 and exposed to the frontend solely as the boolean "is set".
 """
 
+import re
 import threading
 from typing import Any
 
@@ -23,6 +24,13 @@ DEFAULTS: dict[str, Any] = {
     "reduced_motion": False,
     "magnifier_enabled": True,
     "hud_label": "J.A.R.V.I.S.",     # the text in the middle of the rings
+    # Two user-defined top-bar shortcuts. OpenAI and GitHub are fixed in the
+    # frontend; these are the other two. An empty url means "not set up yet",
+    # which the interface shows as a "+" rather than a dead button.
+    "shortcut1_name": "",
+    "shortcut1_url": "",
+    "shortcut2_name": "",
+    "shortcut2_url": "",
     # --- assistant behaviour ---------------------------------------------
     "wake_word": "Jarvis",           # REFLEX acts only on a phrase containing it
     "focus_minutes": 30,             # length of a FOCUS session
@@ -43,20 +51,72 @@ DEFAULTS: dict[str, Any] = {
         "es": "",
         "it": "",
     },
+    # Male or female per language, when both are installed. Empty means
+    # "whichever is configured or found" — the behaviour before this existed.
+    "voice_gender_by_language": {
+        "ro": "", "en": "", "fr": "", "de": "", "es": "", "it": "",
+    },
     "voice_override": "",            # manual pick; empty = follow language
     "tts_speed": 1.0,
+    # Whether a failed JARVIS voice may be replaced by the device's own
+    # (Android's Web Speech voice). Off: a silent substitution is how JARVIS
+    # ended up speaking in a voice the user never chose and could not change.
+    "tts_browser_fallback": False,
     # --- models ----------------------------------------------------------
     # Which brain answers. "ollama" is free, local and offline; "openai" is
     # a paid remote API. Switching to a billed provider needs an explicit
     # acknowledgement, enforced in update_config() rather than only in the UI.
-    "llm_provider": "ollama",            # "ollama" | "openai"
+    "llm_provider": "ollama",            # "ollama" | "openai" | "claude"
+    # How the provider is chosen for each turn. "manual" answers with
+    # llm_provider exactly as picked, which is how every earlier version
+    # behaved. "local" is always Ollama, "cloud" is always an authorised
+    # paid provider, and "auto" prefers Ollama and reaches for the cloud only
+    # when Ollama cannot answer *and* a paid provider is authorised.
+    "llm_mode": "manual",                # manual | local | cloud | auto
+    # Whether OpenAI and Claude are handed the Armory's tools. Each tool
+    # round is a separate billed request, so this can be turned off.
+    "cloud_tools_enabled": True,
+    "openai_enabled": False,             # the connection may be used at all
     "openai_model": "gpt-4o-mini",
     "openai_vision_model": "",           # empty = use the chat model
     "openai_base_url": "https://api.openai.com/v1",
     "openai_cost_ack": False,            # the user has seen the cost notice
+    # --- Claude (Anthropic API) ------------------------------------------
+    "claude_enabled": False,
+    "claude_model": "claude-opus-5-5",
+    "claude_vision_model": "",           # empty = use the chat model
+    "anthropic_base_url": "https://api.anthropic.com",
+    "claude_cost_ack": False,
+    "claude_effort": "low",              # low | medium | high — billed thinking
+    # --- Claude Code (the local CLI) --------------------------------------
+    # Off by default, and useless until a working directory is chosen. Edits
+    # are a second switch on top of that; see server/claude_code.py.
+    "claude_code_enabled": False,
+    "claude_code_allow_edits": False,
+    "claude_code_workdir": "",
+    "claude_code_model": "",             # empty = whatever the CLI defaults to
+    "claude_code_max_turns": 6,
+    # --- MCP tools in chat ------------------------------------------------
+    # Off by default: a tool that changes something waits for the user, one
+    # call at a time. Turning this on skips that per-call approval.
+    "mcp_allow_writes": False,
     # Every turn resends this many past messages. On a metered provider that
     # window is a direct multiplier on the bill, so it is configurable.
     "chat_history_limit": 20,
+    # A second brake on the window, in characters. A phone model re-reads the
+    # whole window every turn, and twenty long messages cost far more than
+    # twenty short ones, which a message count cannot see.
+    "chat_char_budget": 6000,
+    # How long Ollama should keep the model in memory between messages.
+    # Ollama's own default is five minutes, after which the next message pays
+    # a multi-gigabyte reload before its first token.
+    "ollama_keep_alive": "30m",
+    # 0 means "don't send it", leaving Ollama's own default. Raising num_ctx
+    # costs memory, which on a phone is the scarce thing, so it is opt-in.
+    "ollama_num_ctx": 0,
+    # -1 means no limit. A positive value caps answer length, which bounds
+    # the worst case on a slow device at the price of cutting long answers.
+    "ollama_num_predict": -1,
     "ollama_url": "http://127.0.0.1:11434",
     "chat_model": "llama3.2:3b",
     "vision_model": "qwen3-vl:2b-instruct",
@@ -106,28 +166,100 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     cfg["hud_label"] = label[:16] or DEFAULTS["hud_label"]
     wake = str(cfg.get("wake_word") or "").strip()
     cfg["wake_word"] = wake[:24] or DEFAULTS["wake_word"]
+
+    # Shortcuts: only ever hand the browser an http(s) address. Anything else
+    # — javascript:, data:, a typo — is dropped rather than rendered as a
+    # link, and the slot falls back to its "+" state.
+    for n in (1, 2):
+        name = str(cfg.get(f"shortcut{n}_name") or "").strip()
+        cfg[f"shortcut{n}_name"] = name[:18]
+        url = str(cfg.get(f"shortcut{n}_url") or "").strip()
+        cfg[f"shortcut{n}_url"] = url[:400] if url.startswith(("http://", "https://")) else ""
     try:
         minutes = int(cfg.get("focus_minutes") or DEFAULTS["focus_minutes"])
     except (TypeError, ValueError):
         minutes = DEFAULTS["focus_minutes"]
     cfg["focus_minutes"] = max(1, min(240, minutes))
 
+    # Speech rate. The floor is deliberately low: 0.6 was not slow enough to
+    # follow a long answer in a second language.
+    try:
+        speed = float(cfg.get("tts_speed") or DEFAULTS["tts_speed"])
+    except (TypeError, ValueError):
+        speed = DEFAULTS["tts_speed"]
+    cfg["tts_speed"] = round(max(0.3, min(2.0, speed)), 2)
+
+    # Only a gender this project knows how to honour, so a typo cannot leave
+    # a language mute.
+    genders = dict(cfg.get("voice_gender_by_language") or {})
+    cfg["voice_gender_by_language"] = {
+        lang: (str(value or "").strip().lower() if str(value or "").strip().lower()
+               in ("male", "female") else "")
+        for lang, value in genders.items()
+    }
+
     # --- provider --------------------------------------------------------
-    if cfg.get("llm_provider") not in ("ollama", "openai"):
+    if cfg.get("llm_provider") not in ("ollama", "openai", "claude"):
         cfg["llm_provider"] = "ollama"
-    # A paid provider cannot be switched on until the cost notice has been
-    # acknowledged. Enforcing it here means a hand-edited config.json, or a
-    # POST that skipped the UI, still cannot start spending money silently.
-    if cfg.get("llm_provider") == "openai" and not cfg.get("openai_cost_ack"):
+    if cfg.get("llm_mode") not in ("manual", "local", "cloud", "auto"):
+        cfg["llm_mode"] = "manual"
+    # A paid provider cannot be selected until it has been switched on AND its
+    # cost notice acknowledged. Enforcing it here rather than only in the UI
+    # means a hand-edited config.json, or a POST that skipped the interface,
+    # still cannot start spending money. Ollama is always the fallback.
+    if cfg.get("llm_provider") == "openai" and not (
+        cfg.get("openai_enabled") and cfg.get("openai_cost_ack")
+    ):
+        cfg["llm_provider"] = "ollama"
+    if cfg.get("llm_provider") == "claude" and not (
+        cfg.get("claude_enabled") and cfg.get("claude_cost_ack")
+    ):
         cfg["llm_provider"] = "ollama"
     base = str(cfg.get("openai_base_url") or "").strip()
     cfg["openai_base_url"] = base if base.startswith(("http://", "https://")) \
         else DEFAULTS["openai_base_url"]
+    anthropic_base = str(cfg.get("anthropic_base_url") or "").strip()
+    cfg["anthropic_base_url"] = anthropic_base if anthropic_base.startswith(("http://", "https://")) \
+        else DEFAULTS["anthropic_base_url"]
+    if str(cfg.get("claude_effort") or "").lower() not in ("low", "medium", "high"):
+        cfg["claude_effort"] = DEFAULTS["claude_effort"]
+
+    # --- Claude Code ------------------------------------------------------
+    # Edits cannot be allowed on a connection that is off, and neither switch
+    # means anything without a working directory.
+    if not cfg.get("claude_code_enabled"):
+        cfg["claude_code_allow_edits"] = False
+    try:
+        turns = int(cfg.get("claude_code_max_turns") or DEFAULTS["claude_code_max_turns"])
+    except (TypeError, ValueError):
+        turns = DEFAULTS["claude_code_max_turns"]
+    cfg["claude_code_max_turns"] = max(1, min(20, turns))
     try:
         window = int(cfg.get("chat_history_limit") or DEFAULTS["chat_history_limit"])
     except (TypeError, ValueError):
         window = DEFAULTS["chat_history_limit"]
     cfg["chat_history_limit"] = max(2, min(100, window))
+    try:
+        budget = int(cfg.get("chat_char_budget") or DEFAULTS["chat_char_budget"])
+    except (TypeError, ValueError):
+        budget = DEFAULTS["chat_char_budget"]
+    cfg["chat_char_budget"] = max(500, min(200_000, budget))
+    try:
+        ctx = int(cfg.get("ollama_num_ctx") or 0)
+    except (TypeError, ValueError):
+        ctx = 0
+    cfg["ollama_num_ctx"] = 0 if ctx <= 0 else max(512, min(131_072, ctx))
+    try:
+        predict = int(cfg.get("ollama_num_predict"))
+    except (TypeError, ValueError):
+        predict = DEFAULTS["ollama_num_predict"]
+    cfg["ollama_num_predict"] = -1 if predict < 0 else max(16, min(8192, predict))
+    keep = str(cfg.get("ollama_keep_alive") or "").strip()
+    # Ollama takes a duration string ("30m", "1h") or a number of seconds.
+    # Anything else would be rejected at request time, far from here.
+    if not re.fullmatch(r"-?\d+(\.\d+)?(ms|s|m|h)?", keep):
+        keep = DEFAULTS["ollama_keep_alive"]
+    cfg["ollama_keep_alive"] = keep
 
 
 def update_config(patch: dict[str, Any]) -> dict[str, Any]:

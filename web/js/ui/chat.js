@@ -5,11 +5,11 @@ import { t, tLLMError } from '../i18n/index.js';
 import { toast } from './toast.js';
 
 export default class Chat {
-  constructor({ voice, onActivity, onSend, onReply }) {
+  constructor({ voice, onActivity, onSend, onReply } = {}) {
     this.voice = voice;
     this.onActivity = onActivity;
-    this.onSend = onSend;      // the dock opens itself when a message goes out
-    this.onReply = onReply;    // the collapsed dock shows the last answer
+    this.onSend = onSend;
+    this.onReply = onReply;
     this.messages = document.getElementById('messages');
     this.form = document.getElementById('composer');
     this.input = document.getElementById('chat-input');
@@ -20,6 +20,9 @@ export default class Chat {
     this.historyList = document.getElementById('history-list');
     this.stream = null;
     this.pending = null;
+    this._stick = true;        // follow a streaming answer until the reader scrolls up
+
+    this.messages?.addEventListener('scroll', () => { this._stick = this._atBottom(); }, { passive: true });
 
     this.form?.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -35,6 +38,212 @@ export default class Chat {
     this.stopBtn?.addEventListener('click', () => this.abort());
     this.newBtn?.addEventListener('click', () => this.newConversation());
     this.historyBtn?.addEventListener('click', () => this.toggleHistory());
+
+    this._initCollapse();
+  }
+
+  // ---------------------------------------------------------------- collapse
+
+  /**
+   * Swipe the conversation down to clear the screen, up to bring it back.
+   *
+   * Pointer events rather than touch events: the same code then answers to a
+   * finger on Android and to a mouse, which is also what makes the gesture
+   * testable. The grip carries `touch-action: none` so the browser does not
+   * claim the vertical drag for a page scroll before we see it.
+   */
+  _initCollapse() {
+    this.panel = document.getElementById('chat-panel');
+    this.grip = document.getElementById('chat-grip');
+    this.app = document.getElementById('app');
+    if (!this.panel || !this.app) return;
+
+    // The grip's height is the collapsed height; measure it rather than
+    // hard-coding it twice.
+    const gripHeight = () => Math.round(this.grip?.getBoundingClientRect().height || 22);
+
+    let start = 0;
+    let startHeight = 0;
+    let dragging = false;
+    let moved = 0;
+    let fromList = false;
+
+    const begin = (event, viaList) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      dragging = true;
+      fromList = viaList;
+      moved = 0;
+      start = event.clientY;
+      startHeight = this.panel.getBoundingClientRect().height;
+      this.panel.classList.add('is-dragging');
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* fine */ }
+    };
+
+    const move = (event) => {
+      if (!dragging) return;
+      const delta = event.clientY - start;
+      moved = delta;
+      // A drag that began in the message list only counts while the list is
+      // at the very top and the finger is going down — otherwise it is a
+      // scroll and must be left alone.
+      if (fromList && (delta < 0 || this.messages.scrollTop > 0)) {
+        this._endDrag();
+        dragging = false;
+        return;
+      }
+      event.preventDefault();
+      const min = gripHeight();
+      const max = this._maxPanelHeight();
+      // One formula serves both directions: dragging down (positive delta)
+      // shrinks the panel, dragging up grows it, whichever state it is in.
+      const next = Math.max(min, Math.min(max, startHeight - delta));
+      this.panel.style.maxHeight = next + 'px';
+    };
+
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      this.panel.classList.remove('is-dragging');
+      // A short drag is a tap or a wobble; leave the panel as it was, but
+      // animate it back from where the finger left it.
+      const THRESHOLD = 44;
+      const target = Math.abs(moved) < THRESHOLD ? this.collapsed : moved > 0;
+      // The inline height from the drag is the animation's starting point,
+      // so it is left in place for setCollapsed to transition away from.
+      if (target === this.collapsed) {
+        const to = target ? (this.gripH || 22) : this._maxPanelHeight();
+        requestAnimationFrame(() => {
+          if (this.panel) this.panel.style.maxHeight = to + 'px';
+        });
+        clearTimeout(this._settle);
+        this._settle = setTimeout(() => {
+          if (this.panel) this.panel.style.maxHeight = '';
+        }, 340);
+        return;
+      }
+      this.setCollapsed(target);
+    };
+
+    this.grip?.addEventListener('pointerdown', (e) => begin(e, false));
+    this.grip?.addEventListener('pointermove', move);
+    this.grip?.addEventListener('pointerup', end);
+    this.grip?.addEventListener('pointercancel', end);
+    // A tap on the grip toggles. Guarded so the end of a drag is not also
+    // read as a tap.
+    this.grip?.addEventListener('click', () => {
+      if (Math.abs(moved) >= 8) { moved = 0; return; }
+      this.setCollapsed(!this.collapsed);
+    });
+
+    // Swiping within the conversation itself, but only from the top of it.
+    this.messages?.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return;      // a mouse scrolls with the wheel
+      if (this.messages.scrollTop > 0) return;    // mid-scroll: not our gesture
+      begin(e, true);
+    });
+    this.messages?.addEventListener('pointermove', move);
+    this.messages?.addEventListener('pointerup', end);
+    this.messages?.addEventListener('pointercancel', end);
+
+    // While collapsed the panel is only the grip, so an upward swipe there
+    // is the way back.
+    this.panel.addEventListener('pointerdown', (e) => {
+      if (!this.collapsed || e.target === this.grip || this.grip?.contains(e.target)) return;
+      begin(e, false);
+    });
+    this.panel.addEventListener('pointermove', move);
+    this.panel.addEventListener('pointerup', end);
+
+    this.gripH = gripHeight();
+    this.app.style.setProperty('--chat-grip-h', this.gripH + 'px');
+    // The remembered state is applied without animating: a panel that slides
+    // shut on every load would look like a glitch, not a preference.
+    this.setCollapsed(this._remembered(), { silent: true, animate: false });
+  }
+
+  _endDrag() {
+    this.panel?.classList.remove('is-dragging');
+    if (this.panel) this.panel.style.maxHeight = '';
+  }
+
+  /** How tall the panel may grow: what the workspace can actually give it. */
+  _maxPanelHeight() {
+    const workspace = this.panel?.parentElement;
+    if (!workspace) return 2000;
+    const others = [...workspace.children]
+      .filter((el) => el !== this.panel && !el.hidden)
+      .reduce((total, el) => total + el.getBoundingClientRect().height, 0);
+    return Math.max(80, workspace.getBoundingClientRect().height - others - 10);
+  }
+
+  get collapsed() {
+    return this.app?.dataset.chat === 'collapsed';
+  }
+
+  setCollapsed(collapsed, { silent = false, animate = true } = {}) {
+    if (!this.app) return;
+    const wasCollapsed = this.collapsed;
+    this.app.dataset.chat = collapsed ? 'collapsed' : 'open';
+
+    // Animate between the panel's *real* heights.
+    //
+    // The stylesheet's open state is `max-height: 2000px`, because a
+    // transition cannot start from `none`. Left alone, collapsing animates
+    // 2000px down to 22px — and since the panel is only ~420px tall, nothing
+    // moves for the first two thirds of the slide and then it drops all at
+    // once. Pinning the start to the measured height makes every millisecond
+    // of the transition visible movement.
+    if (animate && this.panel && wasCollapsed !== collapsed) {
+      const from = this.panel.getBoundingClientRect().height;
+      const to = collapsed
+        ? (this.gripH || 22)
+        : this._maxPanelHeight();
+      this.panel.style.maxHeight = from + 'px';
+      void this.panel.offsetHeight;          // flush, so the next value animates
+      requestAnimationFrame(() => {
+        if (!this.panel) return;
+        this.panel.style.maxHeight = to + 'px';
+      });
+      clearTimeout(this._settle);
+      this._settle = setTimeout(() => {
+        // Hand the panel back to the stylesheet: inline heights would stop
+        // an open panel growing with the conversation.
+        if (this.panel) this.panel.style.maxHeight = '';
+      }, 340);
+    }
+
+    if (this.grip) {
+      this.grip.setAttribute('aria-expanded', String(!collapsed));
+      const key = collapsed ? 'chat.expand' : 'chat.collapse';
+      this.grip.setAttribute('aria-label', t(key));
+      this.grip.title = t(key);
+    }
+    if (!collapsed) this._follow(true);
+    if (!silent) {
+      try { localStorage.setItem('jarvis.chatCollapsed', collapsed ? '1' : '0'); } catch { /* private mode */ }
+    }
+  }
+
+  _remembered() {
+    try { return localStorage.getItem('jarvis.chatCollapsed') === '1'; } catch { return false; }
+  }
+
+  /**
+   * Follow the conversation only when the reader is already at the end of it.
+   *
+   * The panel is tall enough now to read back through a long answer while the
+   * next one streams in; yanking it to the bottom on every token would make
+   * that impossible.
+   */
+  _atBottom() {
+    const box = this.messages;
+    if (!box) return false;
+    return box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+  }
+
+  _follow(force) {
+    if (!this.messages) return;
+    if (force || this._stick) this.messages.scrollTop = this.messages.scrollHeight;
   }
 
   _autosize() {
@@ -128,7 +337,7 @@ export default class Chat {
     body.textContent = text;
     el.append(role, body);
     this.messages.appendChild(el);
-    this.messages.scrollTop = this.messages.scrollHeight;
+    this._follow(true);
     return body;
   }
 
@@ -143,15 +352,37 @@ export default class Chat {
 
     const cfg = state.get('config') || {};
     const language = cfg.conversation_language || 'ro';
+    // Asking a question is asking to see the answer: a collapsed panel comes
+    // back rather than streaming a reply into a closed drawer.
+    if (this.collapsed) this.setCollapsed(false);
     this.onSend?.(text);
+    this._stick = true;        // sending is asking to see the answer
     this.input.value = '';
     this._autosize();
     this.addMessage('user', text);
 
-    const body = this.addMessage('jarvis', '');
-    const bubble = body.parentElement;
-    bubble.classList.add('is-streaming');
+    // One turn can produce several bubbles: the model may say something,
+    // call a tool, then carry on. Each run of text is its own bubble so the
+    // transcript reads in the order things happened, instead of text jumping
+    // around a tool card that arrived after it.
+    let segment = this._newSegment();
     let answer = '';
+
+    const appendText = (chunk) => {
+      if (!segment) segment = this._newSegment();
+      segment.text += chunk;
+      segment.body.textContent = segment.text;
+      answer += chunk;
+    };
+
+    // A tool card is about to land. Close off whatever has been said so far;
+    // anything after the tool starts a fresh bubble.
+    const closeSegment = () => {
+      if (!segment) return;
+      segment.bubble.classList.remove('is-streaming');
+      if (!segment.text) segment.bubble.remove();
+      segment = null;
+    };
 
     this._setBusy(true);
     this.onActivity?.('thinking');
@@ -163,29 +394,197 @@ export default class Chat {
           if (data.conversation_id) state.set({ conversationId: data.conversation_id });
         },
         onToken: (chunk) => {
-          answer += chunk;
-          body.textContent = answer;
-          this.messages.scrollTop = this.messages.scrollHeight;
+          appendText(chunk);
+          this._follow(false);
+        },
+        onToolCall: (data) => {
+          closeSegment();
+          this._toolCard(data);
+        },
+        onToolResult: (data) => {
+          closeSegment();
+          this._toolResult(data);
+        },
+        onToolApproval: (data) => {
+          closeSegment();
+          this._toolApproval(data);
         },
         onError: (data) => {
-          bubble.classList.add('msg-error');
-          body.textContent = tLLMError(data.code, data.detail);
+          if (!segment) segment = this._newSegment();
+          segment.bubble.classList.add('msg-error');
+          segment.body.textContent = tLLMError(data.code, data.detail);
+          segment.text = ' ';     // keep the bubble: it carries the error
         },
         onDone: (data) => {
           const finalText = (data.text || answer).trim();
-          body.textContent = finalText;
+          // The text is already on screen, streamed. Only write it out again
+          // if nothing arrived — a provider that answered in one piece.
+          if (!answer && finalText) appendText(finalText);
+          const last = segment || this._lastBubble();
           this.onReply?.(finalText);
-          if (finalText) this._addReplay(bubble, finalText, language);
+          if (finalText && last) {
+            this._addReplay(last.bubble, finalText, language);
+            this._addTiming(last.bubble, data);
+          }
           this.voice?.speak(finalText, language);
         },
         onClose: () => {
-          bubble.classList.remove('is-streaming');
+          closeSegment();
           this.stream = null;
           this._setBusy(false);
           if (state.get('activity') === 'thinking') this.onActivity?.('idle');
         },
       },
     );
+  }
+
+  /** A fresh, empty JARVIS bubble to stream the next run of text into. */
+  _newSegment() {
+    const body = this.addMessage('jarvis', '');
+    const bubble = body.parentElement;
+    bubble.classList.add('is-streaming');
+    return { body, bubble, text: '' };
+  }
+
+  _lastBubble() {
+    const bubbles = [...(this.messages?.querySelectorAll('.msg-jarvis') || [])];
+    const bubble = bubbles[bubbles.length - 1];
+    if (!bubble) return null;
+    return { bubble, body: bubble.querySelector('.msg-body'), text: '' };
+  }
+
+  /**
+   * How long the turn took, under the answer.
+   *
+   * Two numbers rather than one, because they mean different things: a large
+   * time-to-first-word with a quick finish is the model loading or thinking,
+   * while the reverse is JARVIS getting in the way. Without the split, a slow
+   * answer is just "slow".
+   */
+  _addTiming(bubble, data) {
+    if (!bubble || data.ms_total == null) return;
+    const line = document.createElement('div');
+    line.className = 'msg-timing';
+    const first = data.ms_first_token;
+    line.textContent = first == null
+      ? t('chat.timingTotal', { total: (data.ms_total / 1000).toFixed(1) })
+      : t('chat.timing', {
+        first: (first / 1000).toFixed(1),
+        total: (data.ms_total / 1000).toFixed(1),
+      });
+    bubble.appendChild(line);
+  }
+
+  /**
+   * A card in the transcript for one tool call.
+   *
+   * It is created when the call starts and filled in when the result lands,
+   * so the user watches the tool run rather than being told afterwards that
+   * it did. A call that did not run says so, in its own colour.
+   */
+  _toolCard(data) {
+    if (!this.messages) return null;
+    this.messages.querySelector('.empty')?.remove();
+    const card = document.createElement('div');
+    card.className = 'tool-card is-running';
+    card.dataset.tool = data.tool || data.name;
+
+    const head = document.createElement('div');
+    head.className = 'tool-head';
+    const ico = document.createElement('span');
+    ico.className = 'tool-ico';
+    ico.setAttribute('aria-hidden', 'true');
+    ico.textContent = data.writes ? '✎' : '⬡';
+    const name = document.createElement('span');
+    name.className = 'tool-name';
+    name.textContent = data.tool || data.name;
+    const state = document.createElement('span');
+    state.className = 'tool-state';
+    state.textContent = t('tool.running');
+    head.append(ico, name, state);
+    card.append(head);
+
+    const args = data.arguments && Object.keys(data.arguments).length
+      ? JSON.stringify(data.arguments)
+      : '';
+    if (args) {
+      const pre = document.createElement('div');
+      pre.className = 'tool-args';
+      pre.textContent = args.slice(0, 300);
+      card.appendChild(pre);
+    }
+
+    this.messages.appendChild(card);
+    this._follow(true);
+    return card;
+  }
+
+  _toolResult(data) {
+    // Match the newest running card for this tool; fall back to a fresh one
+    // so a result can never arrive with nowhere to show.
+    const cards = [...this.messages.querySelectorAll('.tool-card.is-running')];
+    const card = cards.reverse().find((c) => c.dataset.tool === (data.tool || data.name))
+      || this._toolCard(data);
+    if (!card) return;
+    card.classList.remove('is-running');
+    card.classList.add(data.ran ? 'is-done' : 'is-failed');
+    const state = card.querySelector('.tool-state');
+    if (state) {
+      state.textContent = data.ran
+        ? t('tool.ran', { ms: data.ms ?? 0 })
+        : t('tool.didNotRun');
+    }
+    const out = document.createElement('pre');
+    out.className = 'tool-out' + (data.ran ? '' : ' is-bad');
+    out.textContent = (data.text || '').slice(0, 2000);
+    card.appendChild(out);
+    this._follow(false);
+  }
+
+  /** A mutating call: nothing has happened yet, and the user decides. */
+  _toolApproval(data) {
+    const card = [...this.messages.querySelectorAll('.tool-card')].pop();
+    const box = document.createElement('div');
+    box.className = 'tool-approve';
+
+    const note = document.createElement('p');
+    note.textContent = t('tool.approveNote', { tool: data.tool });
+    box.appendChild(note);
+
+    const row = document.createElement('div');
+    row.className = 'tool-approve-actions';
+    const yes = document.createElement('button');
+    yes.type = 'button';
+    yes.className = 'btn btn-primary btn-sm';
+    yes.dataset.act = 'approve';
+    yes.textContent = t('tool.approve');
+    yes.addEventListener('click', async () => {
+      yes.disabled = true;
+      try {
+        await api.chatToolApprove(data.pending.id, true);
+        box.replaceChildren();
+        const ok = document.createElement('p');
+        ok.className = 'tool-approved';
+        ok.textContent = t('tool.approved');
+        box.appendChild(ok);
+      } catch (err) {
+        yes.disabled = false;
+        toast(err?.message || t('error.network'), 'error');
+      }
+    });
+    const no = document.createElement('button');
+    no.type = 'button';
+    no.className = 'btn btn-ghost btn-sm';
+    no.dataset.act = 'reject';
+    no.textContent = t('tool.reject');
+    no.addEventListener('click', async () => {
+      try { await api.chatToolApprove(data.pending.id, false); } catch { /* gone already */ }
+      box.remove();
+    });
+    row.append(yes, no);
+    box.appendChild(row);
+    (card || this.messages).appendChild(box);
+    this._follow(true);
   }
 
   _addReplay(bubble, text, language) {

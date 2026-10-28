@@ -1,17 +1,19 @@
 /* ==========================================================================
    JARVIS Android V2 — holographic interface, phone first.
 
-   The whole screen is one flex column:
+   The whole screen is three rows:
 
        top bar            compact: menu, name, activity, settings
-       status strip       slim connection chips, scrolls sideways
-       STAGE              the visualiser — the only element that grows
-       HUD                RINGS/FACE, then MUTE/ACTIVE, then the five functions
-       chat dock          one bar; it expands upward when opened
+       CONSOLE            the instrument band — rings centred, status rail
+                          down the left, control rail down the right, the
+                          hologram in the upper-right corner
+       conversation       always open; the only element that grows
+       chat bar           the composer, and nothing else
 
-   Nothing else is allowed to take vertical space from the stage. Panels are
-   overlays (drawer from the left, sheet from the bottom), not rows in the
-   column, which is what used to push the interface off a phone screen.
+   The console sizes itself from its rails, so every pixel it does not need
+   belongs to the conversation. Panels are overlays (drawer from the left,
+   sheet from the bottom), not rows in the column, which is what used to push
+   the interface off a phone screen.
 
    Everything scales from --zoom, driven by the magnifier in the drawer.
    ========================================================================== */
@@ -29,10 +31,28 @@
   --text-dim:      #74a0a8;
   --ok:            #2ee6a8;
   --warn:          #ffc13d;
+  /* The clock. Brighter and purer than --warn, which is reserved for things
+     that want attention; the clock wants to be read, not reacted to. */
+  --hud-amber:     #ffd60a;
+  --hud-amber-dim: #f7c948;
   --bad:           #ff5d6c;
   --busy:          #6fb4ff;
   --radius:        10px;
   --zoom:          1;
+  /* The two console rails. The dial is centred between them and allowed to
+     run underneath, so these widths set how much of its crown is covered. */
+  --rail-l:        clamp(60px, 18vw, 80px);
+  --rail-r:        clamp(90px, 25vw, 110px);
+  /* Rail controls are translucent on purpose: the dial runs behind them, and
+     a solid fill would read as the rings being chopped off. */
+  --rail-fill:     rgba(5, 16, 27, 0.55);
+
+  /* The console's one set of numbers. The control rail is seven rows, the
+     hologram takes whatever is left of the right column, and the dial is
+     exactly as tall as the two of them together — which is what leaves no
+     gap under the rings. The RINGS/FACE bar is then given the same width. */
+  --rail-row:      26px;
+  --avatar-h:      clamp(96px, 13dvh, 128px);
   --tap:           40px;
   --safe-b:        env(safe-area-inset-bottom, 0px);
   --safe-t:        env(safe-area-inset-top, 0px);
@@ -73,10 +93,31 @@ button, input, select, textarea { font: inherit; color: inherit; font-family: in
 button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 /* ===================== app shell ===================== */
+/* The console's derived sizes live here, not on :root, because a custom
+   property is resolved on the element that declares it: deriving them at the
+   root would freeze them against the root's --rail-row and --avatar-h, and
+   the keyboard and short-screen overrides below would change nothing. */
 .app {
+  /* The control rail: seven rows and their gaps. */
+  --rail-h: calc(7 * var(--rail-row) + 6 * 4px);
+  /* The clear span between the two rails. */
+  --gap-w: calc(100vw - 16px - var(--rail-l) - var(--rail-r));
+  /* The dial, and with it the RINGS/FACE bar: the clear span plus a 28px
+     bleed each side, so the rings read as passing behind the rails without
+     the rails landing on their labels. Never taller than the hologram and the
+     rail together — that is what leaves no gap under the rings — and never
+     wider than the screen. */
+  --dial: min(
+            calc(var(--gap-w) + 56px),
+            calc(var(--avatar-h) + 4px + var(--rail-h)),
+            calc(100vw - 16px),
+            420px
+          );
+
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* top bar, shortcuts, workspace (the only row that grows), chat bar. */
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   height: 100dvh;
   max-height: 100dvh;
   padding: calc(var(--safe-t) + 4px) 8px calc(var(--safe-b) + 4px + var(--kb));
@@ -85,27 +126,14 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 
 /* ===================== workspace =====================
-   One centred column: the visualiser sits in the middle of whatever space is
-   going, with every control stacked compactly beneath it. On a phone there is
-   nothing to put beside it, so nothing is set aside for one. */
+   A column of three: the console band at its natural height, the focus timer
+   when there is one, and the conversation taking everything that is left. */
 .workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-  align-items: center;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.hud-col {
-  width: 100%;
-  max-width: clamp(240px, 86%, 340px);
-  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 0;
-  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Flex items default to min-height/min-width auto, which lets a long label or
@@ -177,20 +205,44 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .icon-btn:active { background: rgba(67, 222, 210, .18); }
 
-/* ===================== status strip ===================== */
-.statusbar {
-  display: flex; gap: 4px; align-items: center; flex: 0 0 auto;
-  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+/* ===================== the console band =====================
+   Three columns — status rail, open centre, control rail — over three rows:
+   the hologram sits in the upper-right corner with the control rail under it,
+   the dial fills the middle column across both of those rows, and the
+   RINGS/FACE bar has the bottom row to itself so neither rail can cover it. */
+.console {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail-l) minmax(0, 1fr) var(--rail-r);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 6px;
+  row-gap: 4px;
+  flex: 0 0 auto;
+  min-height: 0;
+  /* The dial is clamped well inside the band, but a long translation could
+     grow a rail: clip rather than let the dial spill over the conversation. */
+  overflow: hidden;
 }
-.statusbar::-webkit-scrollbar { display: none; }
 
-.chip {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 1px 6px; border-radius: 999px;
-  border: 1px solid var(--line); background: rgba(7, 20, 32, .6);
-  font-size: .48em; letter-spacing: .05em; text-transform: uppercase;
-  white-space: nowrap; color: var(--text-dim);
+/* Both rails sit above the dial and keep their own taps. */
+.rail {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
 }
+.rail-left  { grid-column: 1; grid-row: 1 / 3; align-self: center; }
+.rail-right { grid-column: 3; grid-row: 2; }
+
+/* ===================== status rail ===================== */
+.chip {
+  display: flex; align-items: center; gap: 5px;
+  min-height: var(--rail-row); padding: 2px 7px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--rail-fill);
+  font-size: .48em; letter-spacing: .06em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-dim);
+}
+.chip > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .chip .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); flex: none; }
 .chip[data-state="connected"]         { border-color: rgba(46, 230, 168, .40); color: #a9ffe0; }
 .chip[data-state="connected"] .dot    { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
@@ -199,28 +251,24 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .chip[data-state="error"] .dot        { background: var(--bad); box-shadow: 0 0 7px var(--bad); }
 .chip[data-state="disconnected"] .dot { background: #456069; }
 
-/* ===================== stage ===================== */
-/* ============ 1. avatar card: the hologram, framed ============ */
+/* ============ 1. the hologram, small, upper right ============ */
 .avatar-card {
-  position: relative;
+  position: relative; z-index: 2;
+  grid-column: 3; grid-row: 1;
   width: 100%;
-  height: clamp(124px, 23dvh, 220px);
-  flex: none;
+  /* Taller than the rail needs: it takes the row the RINGS/FACE bar used to
+     occupy, so the right column has no dead space at the top. */
+  height: var(--avatar-h);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background:
-    radial-gradient(70% 60% at 50% 42%, rgba(18, 74, 92, .34), transparent 72%),
-    rgba(4, 12, 22, .72);
-  box-shadow: inset 0 0 22px rgba(67, 222, 210, .12);
+    radial-gradient(70% 62% at 50% 40%, rgba(18, 74, 92, .34), transparent 72%),
+    rgba(4, 12, 22, .78);
+  box-shadow: inset 0 0 18px rgba(67, 222, 210, .14);
   overflow: hidden;
 }
-.avatar-card .card-tag {
-  position: absolute; left: 8px; top: 5px;
-  font-size: .50em; letter-spacing: .24em; text-transform: uppercase;
-  color: rgba(141, 243, 236, .55); pointer-events: none;
-}
 
-/* ============ 2. focus timer, directly under the avatar ============ */
+/* ============ focus timer, under the console ============ */
 .focus-block {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -263,20 +311,22 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-focus="paused"] .focus-dot { animation: none; background: var(--warn); box-shadow: none; }
 .app[data-focus="paused"] .focus-time { color: var(--warn); text-shadow: none; }
 
-/* ============ 3. the rings dial ============ */
+/* ============ 2. the rings dial ============ */
 .stage {
-  position: relative;
-  /* Square, and driven by height rather than width, so everything below it
-     always has room: the visualiser is a fixed instrument, not a filler.
-     max-width keeps it inside a narrow screen, shrinking it squarely. */
-  aspect-ratio: 1 / 1;
-  height: clamp(150px, 25dvh, 240px);
-  width: auto;
-  max-width: 100%;
-  margin-inline: auto;
-  flex: none;
+  /* In the middle column and centred on it, so the dial's axis is the axis of
+     the gap between the rails rather than of the whole band. It is square and
+     exactly as tall as the hologram and the rail together, which leaves no
+     slack above or below it; being wider than the column, it overflows evenly
+     to both sides and runs under the translucent rails. */
+  position: relative; z-index: 1;
+  grid-column: 2; grid-row: 1 / 3;
+  place-self: center;
+  width: var(--dial);
+  height: var(--dial);
   border-radius: var(--radius);
-  background: radial-gradient(62% 58% at 50% 46%, rgba(16, 70, 86, .28), transparent 72%);
+  /* No backing layer: the dial sits straight on the interface background, so
+     the rings blend into it instead of floating on a panel. */
+  background: none;
   overflow: hidden;
   touch-action: none;           /* HOLO drags the projection, not the page */
 }
@@ -317,9 +367,23 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .stage-note[hidden] { display: none; }
 .stage-note.is-warn { color: var(--warn); text-shadow: none; }
 
+/* Standby dims the dial without boxing it in.
+   This was a flat rgba(2, 8, 14, .9) over `inset: 0` — a 275×275 near-opaque
+   rectangle sitting exactly where the rings are, which is the only thing in
+   the stage that has ever drawn a solid black box. A radial fade darkens the
+   centre enough to read the notice while the particle field still shows
+   through at the corners, so the stage never reads as a rectangle. */
 .standby-veil {
   position: absolute; inset: 0; display: grid; place-items: center;
-  background: rgba(2, 8, 14, .9); backdrop-filter: blur(3px); z-index: 5;
+  background: radial-gradient(circle at 50% 50%,
+              rgba(2, 8, 14, .92) 0%,
+              rgba(2, 8, 14, .86) 42%,
+              rgba(2, 8, 14, .55) 72%,
+              rgba(2, 8, 14, 0) 100%);
+  backdrop-filter: blur(3px);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 62%, transparent 100%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 62%, transparent 100%);
+  z-index: 5;
   padding: 12px; text-align: center;
 }
 .standby-veil[hidden] { display: none; }
@@ -331,20 +395,24 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .standby-text { font-size: .72em; color: var(--text-dim); margin: 0 0 4px; }
 .standby-hint { font-size: .62em; color: #52757e; margin: 0 0 10px; }
 
-/* ===================== HUD ===================== */
-.hud { display: flex; flex-direction: column; gap: 5px; flex: 0 0 auto; min-width: 0; }
+/* ===================== 4. the control rail ===================== */
 
-/* --- RINGS / FACE, directly under the visualiser --- */
+/* --- RINGS / FACE: under the dial, exactly as wide --- */
 .mode-row {
-  display: flex; gap: 3px; align-self: stretch;
+  grid-column: 2; grid-row: 3;
+  justify-self: center;
+  width: var(--dial);
+  position: relative; z-index: 2;
+  display: flex; gap: 3px; flex: none;
   padding: 2px; border-radius: 999px;
-  border: 1px solid var(--line); background: rgba(5, 16, 26, .8);
+  border: 1px solid var(--line); background: var(--rail-fill);
 }
 .mode-btn {
   flex: 1 1 0; min-width: 0;
-  min-height: 22px; padding: 2px 6px; border: 0; border-radius: 999px;
+  min-height: 22px; padding: 2px 4px; border: 0; border-radius: 999px;
   background: transparent; color: var(--text-dim);
-  font-size: .54em; letter-spacing: .16em; text-transform: uppercase; cursor: pointer;
+  font-size: .50em; letter-spacing: .10em; text-transform: uppercase; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mode-btn.is-active {
   color: #04161a; font-weight: 700;
@@ -352,17 +420,15 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   box-shadow: 0 0 12px rgba(67, 222, 210, .45);
 }
 
-/* --- MUTE / ACTIVE, directly underneath --- */
-.power-row { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-
+/* --- MUTE, then ACTIVE --- */
 .ctl {
-  display: flex; align-items: center; justify-content: center; gap: 5px;
-  min-height: 32px; padding: 3px 6px;
+  display: flex; align-items: center; gap: 6px; flex: none;
+  min-height: var(--rail-row); padding: 2px 8px;
   border-radius: 7px; border: 1px solid var(--line);
-  background: rgba(7, 20, 32, .8); color: var(--text);
-  font-size: .56em; letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
+  background: var(--rail-fill); color: var(--text);
+  font-size: .54em; letter-spacing: .10em; text-transform: uppercase; cursor: pointer;
 }
-.ctl-dot { width: 7px; height: 7px; border-radius: 50%; background: #43606a; flex: none; }
+.ctl-dot { width: 6px; height: 6px; border-radius: 50%; background: #43606a; flex: none; }
 .ctl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ctl-mic.is-muted { border-color: rgba(255, 93, 108, .42); color: #ffc8cd; background: rgba(38, 10, 16, .66); }
@@ -376,24 +442,24 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .ctl-power.is-standby .ctl-dot { background: #43606a; }
 
 /* --- the five functions: slim stacked rows, name left, state right --- */
-.fn-grid { display: flex; flex-direction: column; gap: 4px; }
+.fn-grid { display: flex; flex-direction: column; gap: 4px; flex: none; }
 
 .fn {
-  display: flex; flex-direction: row; align-items: center; gap: 8px;
-  min-height: 28px; padding: 2px 10px;
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
+  min-height: var(--rail-row); padding: 2px 8px;
   border: 1px solid var(--line); border-radius: 7px;
-  background: rgba(7, 20, 32, .72); color: var(--text-dim);
+  background: var(--rail-fill); color: var(--text-dim);
   cursor: pointer; overflow: hidden; text-align: left;
 }
-.fn-ico { font-size: .68em; line-height: 1; flex: none; color: rgba(141, 243, 236, .55); }
+.fn-ico { font-size: .62em; line-height: 1; flex: none; color: rgba(141, 243, 236, .55); }
 .fn-name {
   flex: 1 1 auto; min-width: 0;
-  font-size: .54em; letter-spacing: .14em; text-transform: uppercase;
+  font-size: .50em; letter-spacing: .10em; text-transform: uppercase;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .fn-state {
-  flex: none;
-  font-size: .50em; letter-spacing: .08em; text-transform: lowercase;
+  flex: 0 1 auto; min-width: 0;
+  font-size: .46em; letter-spacing: .06em; text-transform: lowercase;
   color: #4d6c74; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -409,57 +475,93 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .fn.is-unavailable .fn-state { color: var(--warn); }
 .fn:active { background: rgba(67, 222, 210, .14); }
 
-/* ===================== chat dock ===================== */
-.dock {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 3px 6px 5px;
+/* ===================== 5. the conversation =====================
+   The one element with flex-grow: whatever the console and the chat bar do
+   not take belongs to the messages. */
+.chat-panel {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 4px 6px 6px;
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--panel);
-  min-height: 0;
 }
 
-.dock-head { display: none; align-items: center; gap: 7px; }
-.dock-head h2 {
-  margin: 0; font-size: .64em; letter-spacing: .16em; text-transform: uppercase;
-  color: var(--teal-soft); font-weight: 600; flex: 1 1 auto;
+/* ---------- the conversation collapses out of the way ----------
+   The dock is a sibling of the workspace, not a child of this panel, so the
+   input bar and Send stay exactly where they are whatever this does. */
+.chat-panel {
+  /* A concrete ceiling, because a transition cannot animate out of `none`.
+     Far taller than any phone, so it never clips an expanded panel. */
+  max-height: 2000px;
+  transition: max-height .3s cubic-bezier(.22, .61, .36, 1);
+  overflow: hidden;
 }
-.dock-head-actions { display: flex; gap: 4px; }
+.chat-grip {
+  flex: none;
+  display: flex; align-items: center; justify-content: center;
+  height: 18px; margin: -2px 0 1px; padding: 0;
+  background: none; border: 0; cursor: grab;
+  /* The browser must not claim the vertical drag for scrolling: without
+     this, Android starts a page pan and the panel never sees the gesture. */
+  touch-action: none;
+}
+.chat-grip:active { cursor: grabbing; }
+.chat-grip-bar {
+  width: 42px; height: 3px; border-radius: 999px;
+  background: var(--line);
+  box-shadow: 0 0 8px rgba(67, 222, 210, .25);
+  transition: background .18s ease, width .18s ease;
+}
+.chat-grip:hover .chat-grip-bar,
+.chat-grip:focus-visible .chat-grip-bar { background: var(--teal-soft); width: 54px; }
 
-/* The handle is the whole top edge of the dock, so it is reachable with a
-   thumb whether the dock is open or closed. */
-.dock-grip {
-  width: 100%; height: 14px; flex: none; padding: 0; margin: -2px 0 0;
-  border: 0; background: transparent; cursor: pointer;
-  display: grid; place-items: center;
+/* Collapsed: the grip alone remains, and everything below it is gone from
+   the layout so the freed height goes back to the console. */
+.app[data-chat="collapsed"] .chat-panel {
+  max-height: var(--chat-grip-h, 22px);
+  border-color: transparent;
+  background: none;
 }
-.grip-bar {
-  display: block; width: 34px; height: 3px; border-radius: 3px;
-  background: rgba(141, 243, 236, .45);
+.app[data-chat="collapsed"] .chat-head,
+.app[data-chat="collapsed"] .messages,
+.app[data-chat="collapsed"] .history-list { opacity: 0; pointer-events: none; }
+.app[data-chat="collapsed"] .chat-grip-bar { width: 58px; background: var(--teal-soft); }
+.chat-head, .messages { transition: opacity .18s ease; }
+
+/* With the conversation out of the way, centre what is left rather than
+   leaving the dial pinned to the top above empty space. */
+.workspace { transition: justify-content .3s ease; }
+.app[data-chat="collapsed"] .workspace { justify-content: center; }
+
+/* While a finger is on the grip, follow it exactly — no transition fighting
+   the drag. The class is removed on release so the snap animates. */
+.chat-panel.is-dragging { transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-panel, .workspace, .chat-head, .messages { transition: none; }
 }
+
+.chat-head { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
+.chat-head .btn { min-height: 24px; padding: 2px 9px; font-size: .56em; }
 
 .messages {
-  display: none;
+  display: flex;
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  flex-direction: column; gap: 5px; padding-right: 2px; scrollbar-width: thin;
+  flex-direction: column; gap: 5px; padding-right: 2px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;  /* momentum, not step-by-step */
+  overscroll-behavior: contain;       /* a flick in the list is not a page pull */
 }
 .messages .empty { color: var(--text-dim); font-size: .66em; text-align: center; margin: auto; }
 
-/* The subtitle line: what JARVIS last said, shown while the dock is closed. */
-.dock-ticker {
-  font-size: .64em; line-height: 1.35; color: var(--teal-soft);
-  max-height: 2.7em; overflow: hidden;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+/* ===================== 6/7. the chat bar ===================== */
+.dock {
+  display: flex; flex-direction: column;
+  padding: 4px 6px 5px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel);
+  flex: none;
 }
-.dock-ticker:empty { display: none; }
-
-.app[data-dock="expanded"] .dock { flex: 1 1 auto; max-height: 56dvh; }
-.app[data-dock="expanded"] .dock-head { display: flex; }
-.app[data-dock="expanded"] .messages { display: flex; }
-/* History replaces the message list, so a hidden list must stay hidden even
-   though the expanded-dock rule above would otherwise show it. */
-.app[data-dock="expanded"] .messages[hidden] { display: none; }
-.app[data-dock="expanded"] .dock-ticker { display: none; }
-.app[data-dock="expanded"] .dock-grip .grip-bar { background: var(--teal); }
 
 .msg {
   max-width: 90%; padding: 6px 9px; border-radius: 9px;
@@ -477,6 +579,16 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   color: var(--text-dim); margin-bottom: 2px;
 }
 .msg-actions { display: flex; gap: 5px; margin-top: 4px; }
+
+/* How long the turn took. Quiet enough to ignore, there when you look. */
+.msg-timing {
+  margin-top: 3px;
+  font-size: .56em;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+  opacity: .72;
+  font-variant-numeric: tabular-nums;
+}
 
 .composer { display: flex; gap: 6px; align-items: flex-end; }
 .composer textarea {
@@ -504,8 +616,11 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .round-stop { border-color: rgba(255, 93, 108, .5); color: #ffc8cd; background: rgba(56, 12, 20, .7); }
 
-.history-list { display: none; overflow-y: auto; flex-direction: column; gap: 4px; min-height: 0; }
-.app[data-dock="expanded"] .history-list:not([hidden]) { display: flex; }
+.history-list {
+  display: flex; flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; flex-direction: column; gap: 4px;
+  overscroll-behavior: contain;
+}
 .history-item {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
@@ -760,6 +875,18 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .voice-row:last-child { border-bottom: 0; }
 .voice-lang { font-size: .64em; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); width: 2.4em; flex: none; }
 .voice-row select { flex: 1 1 110px; min-width: 0; }
+/* Male/female is a short choice; the voice name needs the room. */
+.voice-row .voice-gender { flex: 0 1 84px; }
+.voice-row .voice-pick { flex: 2 1 130px; }
+/* "only male available offline" belongs under the row, not squeezed into it. */
+.voice-only { flex: 1 1 100%; font-size: .56em; }
+
+.voice-diag { margin-top: 8px; }
+.voice-diag summary {
+  font-size: .62em; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-dim); cursor: pointer;
+}
+.voice-diag .hint { font-size: .56em; line-height: 1.5; word-break: break-all; }
 .badge { font-size: .54em; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-dim); white-space: nowrap; }
 .badge-ok { color: #a9ffe0; border-color: rgba(46, 230, 168, .45); }
 .badge-missing { color: var(--warn); border-color: rgba(255, 193, 61, .45); }
@@ -786,16 +913,333 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   max-height: 22dvh; overflow: auto;
 }
 
-/* ===================== immersive mode =====================
-   Tap the visualiser and it takes the whole screen: every other row collapses
-   to nothing and the stage, which is the only element with flex-grow, expands
-   into the space. Tap again and they come back.
+/* ===================== shortcuts =====================
+   The top bar's second line: two fixed links and two of your own. */
+.shortcuts {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px; flex: 0 0 auto;
+}
+.sc {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 0; min-height: 28px; padding: 2px 6px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: rgba(7, 20, 32, .72); color: var(--text-dim);
+  font: inherit; font-size: .50em; letter-spacing: .08em; text-transform: uppercase;
+  text-decoration: none; cursor: pointer;
+}
+.sc:active { background: rgba(67, 222, 210, .18); }
+.sc-ico { flex: none; font-size: 1.15em; line-height: 1; color: var(--teal); }
+.sc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc.is-empty { border-style: dashed; color: #4d6c74; }
+.sc.is-empty .sc-ico { color: #4d6c74; }
 
-   The rows animate their height rather than being switched off, so the
-   transition is smooth and the canvas — watched by a ResizeObserver — keeps
-   step with it instead of jumping at the end. */
-.topbar, .statusbar, .hud, .dock, .avatar-card, .focus-block {
+/* ===================== HUD clock =====================
+   Column 2, top of the band: the dial's own axis, in space the band already
+   had. Nothing below it moves. */
+.hud-clock {
+  grid-column: 2; grid-row: 1;
+  justify-self: center; align-self: start;
+  position: relative; z-index: 3;
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+  pointer-events: none; text-align: center;
+}
+/* The clock reads as an instrument, not as chrome: a bright amber that holds
+   up against the particle field drifting behind it. 13:1 against the page
+   background, so it stays legible at a glance in sunlight. */
+.hud-time {
+  font-size: 1.00em; font-weight: 700; letter-spacing: .14em; line-height: 1.05;
+  color: var(--hud-amber); text-shadow: 0 0 14px rgba(255, 198, 0, .5);
+  font-variant-numeric: tabular-nums;
+}
+/* Weekday, day and month share this line, so one rule covers all three. */
+.hud-date {
+  font-size: .50em; letter-spacing: .20em; text-transform: uppercase; line-height: 1.3;
+  color: var(--hud-amber-dim); text-shadow: 0 0 10px rgba(255, 198, 0, .3);
+}
+
+/* ===================== the travelling edge pulse =====================
+   pathLength="1000" normalises the rectangle's perimeter, so one dash
+   pattern works at every screen size and orientation without JavaScript
+   measuring anything. Only stroke-dashoffset animates, which the compositor
+   handles on its own. */
+.edge {
+  position: fixed; inset: 0; z-index: 45;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+.edge rect {
+  x: 1px; y: 1px;
+  width: calc(100% - 2px); height: calc(100% - 2px);
+  rx: 14px; ry: 14px;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+/* The pulse reports what JARVIS is doing: green while it is listening,
+   thinking or speaking, red while it is standing by. The colour is driven by
+   data-state, set from the same place the activity pill is, so the two can
+   never disagree. */
+.edge-base {
+  stroke: rgba(67, 222, 210, .14);
+  stroke-width: 1;
+}
+.edge[data-state="busy"] .edge-base { stroke: rgba(46, 230, 168, .18); }
+.edge[data-state="rest"] .edge-base { stroke: rgba(255, 93, 108, .16); }
+
+.edge-pulse {
+  stroke: var(--cyan);
+  stroke-width: 2;
+  stroke-linecap: round;
+  /* A short lit arc and a long gap: one pulse running the perimeter. */
+  stroke-dasharray: 90 910;
+  filter: drop-shadow(0 0 5px rgba(60, 224, 255, .85));
+  animation: edge-run 7.5s linear infinite;
+}
+@keyframes edge-run {
+  from { stroke-dashoffset: 1000; }
+  to   { stroke-dashoffset: 0; }
+}
+
+.edge[data-state="busy"] .edge-pulse {
+  stroke: var(--ok);
+  filter: drop-shadow(0 0 5px rgba(46, 230, 168, .85));
+}
+.edge[data-state="rest"] .edge-pulse {
+  stroke: var(--bad);
+  filter: drop-shadow(0 0 5px rgba(255, 93, 108, .80));
+}
+/* Reduced motion keeps the frame and parks the pulse. The class is set from
+   JS because #edge precedes #app and no sibling selector reaches backwards. */
+.edge.is-still .edge-pulse { animation: none; opacity: .35; }
+@media (prefers-reduced-motion: reduce) {
+  .edge-pulse { animation: none; opacity: .35; }
+}
+
+/* ===================== the full-screen backdrop ===================== */
+/* The particle field runs in every mode, so the layer is always up; what
+   full screen adds is the cinematic scene drawn onto the same canvas. */
+.backdrop {
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none; opacity: 1;
+  transition: opacity .45s ease;
+}
+.backdrop canvas { display: block; width: 100%; height: 100%; }
+
+/* The conversation keeps its own panel exactly as it is in every other mode:
+   the backdrop is behind the interface, not through it. */
+.app[data-fullscreen="on"] .console { background: transparent; }
+
+/* ===================== MCP tool cards =====================
+   One card per tool call, in the transcript beside the messages. A call that
+   did not run is coloured as such: the point is that the model's account of
+   what it did can be checked against what actually happened. */
+.tool-card {
+  align-self: stretch;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 7px 9px; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(4, 16, 26, .8);
+  font-size: .70em;
+}
+.tool-card.is-running { border-color: rgba(111, 180, 255, .5); }
+.tool-card.is-done    { border-color: rgba(46, 230, 168, .40); }
+.tool-card.is-failed  { border-color: rgba(255, 93, 108, .50); }
+
+.tool-head { display: flex; align-items: center; gap: 6px; }
+.tool-ico { flex: none; color: var(--teal); font-size: .9em; }
+.tool-name {
+  flex: 1 1 auto; min-width: 0;
+  font-size: .82em; letter-spacing: .06em; color: var(--teal-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tool-state {
+  flex: none; font-size: .72em; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.tool-card.is-running .tool-state { color: var(--busy); animation: pulse 1.1s infinite; }
+.tool-card.is-done .tool-state    { color: #a9ffe0; }
+.tool-card.is-failed .tool-state  { color: #ffc8cd; }
+
+.tool-args, .tool-out {
+  margin: 0; padding: 5px 7px; border-radius: 5px;
+  background: rgba(2, 8, 14, .85);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: .76em; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 24dvh; overflow: auto; color: var(--text-dim);
+}
+.tool-out { color: var(--text); }
+.tool-out.is-bad { color: #ffc8cd; }
+
+.tool-approve {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 5px; padding: 7px 9px; border-radius: 7px;
+  border: 1px solid var(--warn); background: rgba(40, 28, 6, .5);
+}
+.tool-approve p { margin: 0; font-size: .92em; line-height: 1.45; color: var(--warn); }
+.tool-approve-actions { display: flex; gap: 6px; }
+.tool-approved { color: #a9ffe0 !important; }
+
+/* ===================== FULL SCREEN ===================== */
+/* Compact enough to live in the top bar beside the activity pill, and gone
+   entirely once the screen is ours. */
+.fs-btn {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  min-height: 28px; padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: rgba(8, 24, 36, .7); color: var(--teal);
+  font-size: .50em; letter-spacing: .10em; text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+}
+.fs-btn:active { background: rgba(67, 222, 210, .18); }
+.fs-ico { font-size: 1.2em; line-height: 1; }
+
+/* The label is the first thing to go on a narrow screen; the glyph alone
+   still reads as "full screen". */
+@media (max-width: 400px) {
+  .fs-label { display: none; }
+  .fs-btn { padding: 2px 7px; }
+}
+
+.fs-exit {
+  position: fixed; z-index: 60;
+  top: calc(var(--safe-t) + 10px); left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 4px 14px;
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  background: rgba(4, 14, 24, .92); color: var(--teal-soft);
+  font-size: .62em; letter-spacing: .10em; text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .55);
+  backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.fs-exit.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+
+/* Immersive mode folds the chrome away; the exit pill is the one control that
+   must survive it, or a full-screen immersive JARVIS has no visible way back. */
+.app[data-immersive="on"] .fs-exit.is-visible { opacity: 1; pointer-events: auto; }
+
+/* ===================== AI connections ===================== */
+.conn-body { display: flex; flex-direction: column; gap: 10px; }
+.conn-empty { color: var(--text-dim); font-size: .70em; text-align: center; margin: 14px 0; }
+.conn-empty.is-bad { color: #ffc8cd; }
+
+.conn-card {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 10px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: rgba(6, 18, 30, .78);
+}
+.conn-card[data-provider="claude-code"] { border-color: rgba(141, 243, 236, .34); }
+
+.conn-head { display: flex; align-items: center; gap: 8px; }
+.conn-head h3 {
+  margin: 0; flex: 1 1 auto; min-width: 0;
+  font-size: .80em; font-weight: 700; letter-spacing: .10em; text-transform: uppercase;
+  color: #eafffd;
+}
+.conn-badge {
+  flex: none; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(5, 16, 27, .7);
+  font-size: .52em; letter-spacing: .10em; text-transform: uppercase; color: var(--text-dim);
+}
+.conn-badge[data-state="connected"] { border-color: rgba(46, 230, 168, .5); color: #a9ffe0; }
+.conn-badge[data-state="error"]     { border-color: rgba(255, 93, 108, .5); color: #ffc8cd; }
+
+.conn-row { display: flex; align-items: center; gap: 8px; }
+.conn-row > span { flex: 0 0 38%; font-size: .64em; color: var(--text-dim); }
+.conn-row input, .conn-row select {
+  flex: 1 1 auto; min-width: 0; min-height: 32px;
+  padding: 4px 9px; border-radius: 7px;
+  border: 1px solid var(--line); background: rgba(3, 12, 20, .85);
+  color: var(--text); font-size: .68em; outline: none;
+}
+.conn-row input:focus, .conn-row select:focus { border-color: var(--line-strong); }
+
+.conn-note { margin: 0; font-size: .60em; line-height: 1.45; color: var(--text-dim); }
+.conn-note.is-ok   { color: #a9ffe0; }
+.conn-note.is-warn { color: var(--warn); }
+.conn-note.is-bad  { color: #ffc8cd; }
+
+.conn-switch { display: flex; align-items: center; gap: 8px; font-size: .66em; cursor: pointer; }
+.conn-switch.is-disabled { opacity: .45; cursor: not-allowed; }
+.conn-switch input { width: 16px; height: 16px; flex: none; accent-color: var(--teal); }
+
+.conn-key { display: flex; flex-direction: column; gap: 6px; }
+.conn-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.conn-result { margin: 0; font-size: .62em; line-height: 1.45; color: var(--text-dim); }
+.conn-result.is-ok  { color: #a9ffe0; }
+.conn-result.is-bad { color: #ffc8cd; }
+
+.cost-prices { margin: 4px 0; padding-left: 16px; }
+.cost-prices li { font-size: .60em; line-height: 1.5; color: var(--text-dim); }
+
+/* --- Claude Code: the approval queue --- */
+.conn-ask { display: flex; flex-direction: column; gap: 6px; }
+.conn-ask textarea {
+  resize: vertical; min-height: 56px;
+  padding: 6px 9px; border-radius: 7px;
+  border: 1px solid var(--line); background: rgba(3, 12, 20, .85);
+  color: var(--text); font-size: .68em; outline: none; line-height: 1.4;
+}
+
+.conn-queue { display: flex; flex-direction: column; gap: 7px; }
+.conn-queue h4 {
+  margin: 4px 0 0; font-size: .62em; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--teal-soft);
+}
+
+.code-req {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(4, 14, 24, .7);
+}
+/* A request that is waiting on the user is the one thing on this panel that
+   should be impossible to scroll past. */
+.code-req[data-state="pending"] { border-color: var(--warn); box-shadow: 0 0 12px rgba(255, 193, 61, .18); }
+.code-req[data-state="running"] { border-color: rgba(111, 180, 255, .55); }
+.code-req[data-state="error"]   { border-color: rgba(255, 93, 108, .5); }
+
+.code-req-head { display: flex; align-items: center; gap: 6px; }
+.code-mode {
+  padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line);
+  font-size: .50em; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim);
+}
+.code-mode[data-mode="edit"] { border-color: var(--warn); color: var(--warn); }
+.code-state {
+  margin-left: auto; font-size: .52em; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.code-prompt { margin: 0; font-size: .66em; line-height: 1.45; }
+
+.code-cmd, .code-out {
+  margin: 0; padding: 6px 8px; border-radius: 6px;
+  background: rgba(2, 8, 14, .9); border: 1px solid var(--line);
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .54em; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 30dvh; overflow: auto; color: var(--teal-soft);
+}
+.code-out { color: var(--text); max-height: 40dvh; }
+.code-out.is-bad { color: #ffc8cd; border-color: rgba(255, 93, 108, .4); }
+
+/* ===================== immersive mode =====================
+   Tap the visualiser and it takes the whole screen: everything else fades out
+   and the stage is lifted out of the layout. Tap again and they come back.
+
+   They fade rather than being switched off, so the transition is smooth and
+   the canvas — watched by a ResizeObserver — keeps step with it instead of
+   jumping at the end. */
+.topbar, .rail, .dock, .avatar-card, .focus-block, .mode-row {
   transition: opacity .18s ease, transform .18s ease;
+}
+/* The conversation panel needs its collapse in the same declaration: this
+   rule comes after the one that sets up the slide, and `transition` is not
+   additive — listing the panel above silently dropped max-height and the
+   panel snapped shut instead of sliding. */
+.chat-panel {
+  transition: opacity .18s ease, transform .18s ease,
+              max-height .3s cubic-bezier(.22, .61, .36, 1);
 }
 
 /* The stage leaves the column entirely and takes the screen. Lifting it out
@@ -805,8 +1249,12 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   position: fixed;
   inset: 0;
   z-index: 20;
-  /* The stage is normally height-clamped; an explicit height would beat
-     inset:0 and leave it card-sized in the middle of a black screen. */
+  /* The stage is normally height-clamped and centred in its grid area. An
+     explicit height would beat inset:0 and leave it card-sized in the middle
+     of a black screen — and a self-alignment other than stretch makes Chromium
+     shrink-to-fit the fixed box instead, which with absolutely positioned
+     children means no box at all. */
+  place-self: stretch;
   width: auto;
   height: auto;
   max-height: none;
@@ -818,10 +1266,11 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .app[data-immersive="on"] > .topbar,
 .app[data-immersive="on"] > .dock,
-.app[data-immersive="on"] .statusbar,
+.app[data-immersive="on"] .rail,
 .app[data-immersive="on"] .avatar-card,
+.app[data-immersive="on"] .mode-row,
 .app[data-immersive="on"] .focus-block,
-.app[data-immersive="on"] .hud {
+.app[data-immersive="on"] .chat-panel {
   opacity: 0;
   transform: translateY(6px);
   pointer-events: none;
@@ -863,37 +1312,45 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 /* ===================== responsive ===================== */
 
-/* Short phones: tighten the column so the whole stack still clears the dock. */
+/* Short phones: tighten the console so the conversation keeps its share. */
 @media (max-height: 700px) {
   .app { gap: 4px; font-size: calc(14px * var(--zoom)); }
-  .avatar-card { height: clamp(96px, 15dvh, 130px); }
-  .stage { height: clamp(120px, 21dvh, 180px); }
-  .fn { min-height: 24px; }
-  .ctl { min-height: 28px; }
-  .app[data-dock="expanded"] .dock { max-height: 50dvh; }
+  :root { --rail-row: 23px; --avatar-h: clamp(62px, 10dvh, 92px); }
 }
 
-/* Narrow phones: the five function labels still have to fit. */
-@media (max-width: 370px) {
-  .hud-col { max-width: 94%; }
-  .fn-name { letter-spacing: .08em; }
-}
-
-/* Landscape: height is the scarce axis, so the visualiser gives way first. */
-@media (orientation: landscape) and (max-height: 560px) {
-  /* Height is the scarce axis here, so the two visualisers give way first
-     and the card goes entirely — the dial carries the state on its own. */
+/* Typing, or any genuinely short viewport: the hologram gives its corner back
+   so the conversation keeps a usable height while the keyboard is up.
+   Two triggers because there are two kinds of Android: `resizes-content`
+   shrinks the viewport itself (the media query catches it), while an older
+   Chrome leaves it alone and only --kb/data-kb say the keyboard is there. */
+@media (max-height: 560px) {
+  :root { --avatar-h: 0px; --rail-row: 22px; }
   .avatar-card { display: none; }
-  .stage { height: clamp(100px, 26dvh, 160px); }
-  .hud-col { max-width: clamp(240px, 54%, 330px); }
-  .app[data-dock="expanded"] .dock { max-height: 62dvh; }
+  .rail-right { grid-row: 1 / 3; }
+}
+.app[data-kb="on"] { --avatar-h: 0px; --rail-row: 22px; }
+.app[data-kb="on"] .avatar-card { display: none; }
+.app[data-kb="on"] .rail-right { grid-row: 1 / 3; }
+.app[data-kb="on"] .chat-head { display: none; }
+
+/* Narrow phones: the rail labels still have to fit. */
+@media (max-width: 370px) {
+  .fn-name, .ctl-label { letter-spacing: .06em; }
+  .chip { letter-spacing: .03em; }
 }
 
-/* Tablet / desktop PWA window: centre it, keep the column phone-sized. */
+/* Landscape: height is the scarce axis, so the hologram goes first and the
+   console gives its height back to the conversation. */
+@media (orientation: landscape) and (max-height: 560px) {
+  :root { --rail-row: 22px; }
+}
+
+/* Tablet / desktop PWA window: centre it, widen the rails a little. */
 @media (min-width: 760px) {
   .app { max-width: 980px; margin: 0 auto; padding-inline: 16px; }
-  .hud-col { max-width: 380px; }
-  .avatar-card { height: clamp(150px, 22dvh, 230px); }
-  .stage { height: clamp(180px, 28dvh, 300px); }
-  .dock { max-width: 680px; margin: 0 auto; width: 100%; }
+  :root {
+    --rail-l: 120px; --rail-r: 160px;
+    --rail-row: 30px;
+    --avatar-h: clamp(110px, 16dvh, 170px);
+  }
 }

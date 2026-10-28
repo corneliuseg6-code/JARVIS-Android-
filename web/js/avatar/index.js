@@ -122,15 +122,16 @@ export default class Avatar {
     const gl = this.mode === 'face' && this._glReady;
     if (this.canvasGl) this.canvasGl.hidden = !gl;
     this.canvas2d.hidden = gl;
-    // With FACE on the main stage the card would be the same head twice, so
-    // it stands down and gives its space back.
+    // The corner hologram stays up in both modes: it is a fixed part of the
+    // console, and hiding it would shunt the control rail up the moment the
+    // dial is switched.
     this._applyCard();
   }
 
   /** Bring the card's own GL context up the first time it is actually shown. */
   _applyCard() {
     const card = document.getElementById('avatar-card');
-    const wanted = this._cardWanted && this.mode !== 'face';
+    const wanted = this._cardWanted;
     if (card) card.hidden = !wanted;
     if (!wanted || !this.cardFace || this.cardFace.failed) return;
     if (!this.cardFace.ready) {
@@ -320,6 +321,8 @@ export default class Avatar {
     renderer.setQuality(next);
     // The card draws every frame too, so it sheds load with the main stage.
     this.cardFace?.setQuality?.(next);
+    // So does anything else that paints behind the interface.
+    this.onQuality?.(next);
     console.info('[avatar] %d fps — visualiser quality now %d', Math.round(fps), next);
   }
 

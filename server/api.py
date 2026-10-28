@@ -8,7 +8,17 @@ import sys
 import time
 from typing import Any, Iterator
 
-from . import armory, config, conversations, llm, ollama, openai_client, paths, vision, voices
+from . import (
+    anthropic_client, armory, claude_code, config, conversations, llm, ollama,
+    openai_client, paths, toolchat, vision, voices,
+)
+
+#: Which secret store entry belongs to which provider. Keeping the mapping in
+#: one place is what lets the key routes stay provider-agnostic.
+_KEYED_PROVIDERS = {
+    llm.OPENAI: openai_client,
+    llm.CLAUDE: anthropic_client,
+}
 from .app import HttpError, Request, Response, Router, sse
 
 router = Router()
@@ -48,7 +58,8 @@ def health(req: Request) -> Response:
     )
     engine = voices.engine_info()
     chosen = voices.resolve_voice(
-        cfg["conversation_language"], cfg.get("voice_override", ""), cfg.get("voice_by_language")
+        cfg["conversation_language"], cfg.get("voice_override", ""),
+        cfg.get("voice_by_language"), cfg.get("voice_gender_by_language"),
     )
     connections = armory.list_connections()
     return Response(
@@ -110,7 +121,10 @@ def post_config(req: Request) -> Response:
     patch.pop("power_state", None)    # power state goes through /api/power
     # Credentials never travel through the settings document, which is
     # readable by the browser. They have their own endpoint below.
-    for key in ("openai_api_key", "api_key", "openai:api_key"):
+    for key in (
+        "openai_api_key", "api_key", "openai:api_key",
+        "anthropic_api_key", "claude_api_key", "anthropic:api_key",
+    ):
         patch.pop(key, None)
     return Response(config.update_config(patch))
 
@@ -127,7 +141,117 @@ def get_llm_status(req: Request) -> Response:
     info = llm.health(force=True)
     info["providers"] = list(llm.PROVIDERS)
     info["openai_key_set"] = openai_client.has_key()
+    info["claude_key_set"] = anthropic_client.has_key()
     return Response(info)
+
+
+@router.get("/api/llm/connections")
+def get_llm_connections(req: Request) -> Response:
+    """
+    Everything the AI Connections panel needs, in one call.
+
+    Each provider reports whether it is switched on, whether a key is stored
+    (never the key), what it costs, and — for the one in use — its live state.
+    An inactive paid provider is not contacted until the user presses Test.
+    """
+    cfg = config.get_config()
+    live = llm.health(force=True)
+    active = live["provider"]
+
+    def entry(which: str, **extra: Any) -> dict[str, Any]:
+        return {
+            "provider": which,
+            "label": llm.LABELS[which],
+            "active": which == active,
+            "billed": which in llm.BILLED,
+            "model": llm.active_model(which),
+            # Only the active provider has been probed; the others report
+            # "unknown" rather than pretending to a state nobody checked.
+            "state": live.get("state", "unknown") if which == active else "unknown",
+            "detail": live.get("detail", "") if which == active else "",
+            **extra,
+        }
+
+    return Response({
+        "active": active,
+        # How `active` was chosen. In manual mode it is simply the pick; in
+        # the other modes the panel says which rule picked it.
+        "mode": live.get("mode", "manual"),
+        "route_reason": live.get("route_reason", "manual"),
+        "configured": llm.configured(),
+        "authorised": {p: llm.authorised(p) for p in llm.PROVIDERS},
+        "cloud_tools_enabled": llm.supports_tools(llm.OPENAI),
+        "connections": [
+            entry(
+                llm.OLLAMA,
+                enabled=True,
+                key_required=False,
+                key_set=True,
+                cost_ack=True,
+                url=cfg.get("ollama_url", ""),
+            ),
+            entry(
+                llm.OPENAI,
+                enabled=bool(cfg.get("openai_enabled")),
+                key_required=True,
+                key_set=openai_client.has_key(),
+                cost_ack=bool(cfg.get("openai_cost_ack")),
+                url=cfg.get("openai_base_url", ""),
+            ),
+            entry(
+                llm.CLAUDE,
+                enabled=bool(cfg.get("claude_enabled")),
+                key_required=True,
+                key_set=anthropic_client.has_key(),
+                cost_ack=bool(cfg.get("claude_cost_ack")),
+                url=cfg.get("anthropic_base_url", ""),
+                suggested_models=list(anthropic_client.SUGGESTED_MODELS),
+                pricing={m: anthropic_client.price_of(m) for m in anthropic_client.SUGGESTED_MODELS},
+                effort=cfg.get("claude_effort", "low"),
+            ),
+        ],
+        "code": claude_code.status(),
+    })
+
+
+@router.post("/api/llm/test")
+def post_llm_test(req: Request) -> Response:
+    """
+    Check one connection on demand.
+
+    This is the Test button. It probes the named provider whether or not it is
+    the active one — that is the whole point — but it never sends a chat
+    completion, so testing a paid connection costs nothing: listing models is
+    an unbilled call on both APIs.
+    """
+    which = (req.json().get("provider") or "").lower()
+    if which not in llm.PROVIDERS:
+        raise HttpError(400, "unknown provider")
+
+    if which == llm.OLLAMA:
+        info = ollama.health(timeout=4.0)
+        models = info.get("models", [])
+    else:
+        client = _KEYED_PROVIDERS[which]
+        if not client.has_key():
+            return Response({
+                "provider": which, "state": "disconnected",
+                "error": "no_key", "detail": "No API key is stored.", "models": [],
+            })
+        info = client.health(timeout=12.0, force=True)
+        models = info.get("models", [])
+
+    model = llm.active_model(which)
+    return Response({
+        "provider": which,
+        "state": info.get("state", "unknown"),
+        "error": info.get("error", ""),
+        "detail": info.get("detail", ""),
+        "models": models,
+        "model": model,
+        "model_ready": (model in models) if models else info.get("state") == "connected",
+        "billed": which in llm.BILLED,
+    })
 
 
 @router.get("/api/llm/models")
@@ -149,7 +273,8 @@ def post_llm_key(req: Request) -> Response:
     """
     data = req.json()
     which = (data.get("provider") or llm.OPENAI).lower()
-    if which != llm.OPENAI:
+    client = _KEYED_PROVIDERS.get(which)
+    if client is None:
         raise HttpError(400, "unknown provider")
     value = data.get("key")
     if value is None:
@@ -157,18 +282,119 @@ def post_llm_key(req: Request) -> Response:
     value = str(value).strip()
     if value and len(value) < 20:
         raise HttpError(400, "that does not look like an API key")
-    openai_client.set_key(value)
-    return Response({"provider": which, "key_set": openai_client.has_key()})
+    client.set_key(value)
+    return Response({"provider": which, "key_set": client.has_key()})
 
 
 @router.delete("/api/llm/key")
 def delete_llm_key(req: Request) -> Response:
-    openai_client.set_key("")
+    which = (req.q("provider", llm.OPENAI) or llm.OPENAI).lower()
+    client = _KEYED_PROVIDERS.get(which)
+    if client is None:
+        raise HttpError(400, "unknown provider")
+    client.set_key("")
     # Without a key the paid provider cannot work, so fall back rather than
     # leaving every message failing.
-    if llm.provider() == llm.OPENAI:
+    if llm.configured() == which:
         config.update_config({"llm_provider": llm.OLLAMA})
-    return Response({"key_set": openai_client.has_key(), "provider": llm.provider()})
+    return Response({"provider": which, "key_set": client.has_key(), "active": llm.provider()})
+
+
+# --------------------------------------------------------------------------
+# Claude Code — the local CLI, behind an approval gate
+# --------------------------------------------------------------------------
+
+@router.get("/api/chat/tools")
+def get_chat_tools(req: Request) -> Response:
+    """What the model will be offered on the next turn, and why."""
+    definitions, lookup = toolchat.catalogue()
+    return Response({
+        "provider": llm.provider(),
+        "provider_supports_tools": llm.supports_tools(),
+        "count": len(definitions),
+        "writes_allowed": toolchat.writes_allowed(),
+        "tools": [
+            {
+                "name": name,
+                "tool": entry["tool"],
+                "connection_id": entry["connection_id"],
+                "writes": entry["writes"],
+            }
+            for name, entry in lookup.items()
+        ],
+        "pending": toolchat.pending(),
+    })
+
+
+@router.post("/api/chat/tools/approve")
+def post_chat_tool_approve(req: Request) -> Response:
+    """
+    Approve one pending mutating call.
+
+    The approval is bound to that exact tool and those exact arguments, and is
+    consumed the first time it is used, so it cannot be spent on a different
+    path. Ask JARVIS again and the call will go through.
+    """
+    data = req.json()
+    try:
+        if data.get("approve") is False:
+            return Response(toolchat.reject(str(data.get("id") or "")))
+        return Response(toolchat.approve(str(data.get("id") or "")))
+    except toolchat.ToolChatError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+@router.get("/api/code/status")
+def get_code_status(req: Request) -> Response:
+    """Whether there is a usable CLI here, and if not, the actual reason."""
+    return Response(claude_code.status())
+
+
+@router.get("/api/code/requests")
+def get_code_requests(req: Request) -> Response:
+    return Response({"requests": claude_code.recent()})
+
+
+@router.post("/api/code/request")
+def post_code_request(req: Request) -> Response:
+    """
+    Record a coding request. **Nothing runs here.**
+
+    The response carries the exact argument vector, so the interface shows the
+    user the real command before asking them to approve it.
+    """
+    data = req.json()
+    try:
+        record = claude_code.propose(
+            str(data.get("prompt") or ""),
+            directory=str(data.get("directory") or ""),
+            mode=str(data.get("mode") or claude_code.PLAN),
+        )
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
+    return Response(record)
+
+
+@router.post("/api/code/approve")
+def post_code_approve(req: Request) -> Response:
+    """The only route that starts a process, and only for a pending request."""
+    data = req.json()
+    try:
+        record = claude_code.approve(
+            str(data.get("id") or ""),
+            allow_edits=bool(data.get("allow_edits")),
+        )
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
+    return Response(record)
+
+
+@router.post("/api/code/cancel")
+def post_code_cancel(req: Request) -> Response:
+    try:
+        return Response(claude_code.cancel(str(req.json().get("id") or "")))
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
 
 
 @router.post("/api/power")
@@ -193,8 +419,19 @@ def get_voices(req: Request) -> Response:
             "catalog": voices.catalog(),
             "installed": voices.installed_voices(),
             "selected": voices.resolve_voice(
-                cfg["conversation_language"], cfg.get("voice_override", ""), cfg.get("voice_by_language")
+                cfg["conversation_language"], cfg.get("voice_override", ""),
+                cfg.get("voice_by_language"), cfg.get("voice_gender_by_language"),
             ),
+            # Per language: every voice offered (catalogued or simply present)
+            # and which genders can actually be spoken right now.
+            "by_language": {
+                lang: {
+                    "voices": voices.voices_for(lang),
+                    "genders": voices.genders_for(lang),
+                }
+                for lang in config.SUPPORTED_UI_LANGUAGES
+            },
+            "diagnostics": voices.diagnostics(),
         }
     )
 
@@ -223,11 +460,29 @@ def post_tts(req: Request) -> Response:
     data = req.json()
     text = (data.get("text") or "").strip()
     lang = data.get("language") or cfg["conversation_language"]
-    chosen = voices.resolve_voice(lang, cfg.get("voice_override", ""), cfg.get("voice_by_language"))
+    # A preview asks for one specific voice; ordinary speech follows the
+    # language's settings. Either way nothing is substituted.
+    wanted = (data.get("voice") or "").strip()
+    if wanted:
+        chosen = voices.resolve_voice(lang, wanted)
+    else:
+        chosen = voices.resolve_voice(
+            lang, cfg.get("voice_override", ""), cfg.get("voice_by_language"),
+            cfg.get("voice_gender_by_language"),
+        )
+    if chosen["reason"] == "gender_unavailable":
+        raise HttpError(409, "voice_gender_unavailable:" + ",".join(
+            chosen.get("available_genders") or []))
     if not chosen["installed"]:
         raise HttpError(409, f"voice_unavailable:{chosen['voice'] or lang}")
+    # A preview can carry the slider's value so the rate can be heard before
+    # it is saved; otherwise the saved setting applies.
     try:
-        wav = voices.synthesize(text, chosen["voice"], float(cfg.get("tts_speed") or 1.0))
+        speed = float(data.get("speed") or cfg.get("tts_speed") or 1.0)
+    except (TypeError, ValueError):
+        speed = 1.0
+    try:
+        wav = voices.synthesize(text, chosen["voice"], speed)
     except Exception as exc:  # noqa: BLE001
         raise HttpError(503, f"tts_failed:{exc}") from exc
     return Response(wav, content_type="audio/wav")
@@ -274,8 +529,12 @@ def post_chat(req: Request) -> Response:
         raise HttpError(400, "message required")
     lang = data.get("language") or cfg["conversation_language"]
     conv_id = data.get("conversation_id") or ""
+    # Routed once, here: every round of this turn goes to the same brain, even
+    # if automatic routing would choose differently a second from now.
+    routed = llm.route()
+    which = routed["provider"]
     # Whichever provider is active decides the default model.
-    model = (data.get("model") or "").strip() or llm.active_model()
+    model = (data.get("model") or "").strip() or llm.active_model(which)
 
     if conv_id:
         try:
@@ -289,7 +548,12 @@ def post_chat(req: Request) -> Response:
     window = llm.history_limit()
     history = [{"role": m["role"], "content": m["content"]} for m in conv["messages"][-window:]]
     system = (cfg.get("system_prompt") or "").strip() or _language_instruction(lang)
-    messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": message}]
+    # Two brakes on the window: a message count, and a character budget that
+    # can see the difference between twenty short turns and twenty long ones.
+    messages = llm.trim_history(
+        [{"role": "system", "content": system}, *history,
+         {"role": "user", "content": message}]
+    )
 
     conversations.append(conv_id, "user", message, language=lang)
 
@@ -298,17 +562,58 @@ def post_chat(req: Request) -> Response:
             "conversation_id": conv_id,
             "model": model,
             "language": lang,
-            "provider": llm.provider(),
+            "provider": which,
+            "mode": routed["mode"],
+            "route_reason": routed["reason"],
         })
         parts: list[str] = []
+        started = time.time()
+        first_token: float | None = None
+        # When a connected MCP server exposes tools and the active provider can
+        # take them, the turn goes through the tool loop instead of a plain
+        # stream: the model has to be handed the tools before it can ask for
+        # one. Without tools, or on a provider that cannot use them, nothing
+        # about the old path changes.
+        use_tools = llm.supports_tools(which) and toolchat.available()
         try:
-            for chunk in llm.chat_stream(messages, model=model):
-                piece = chunk.get("message", {}).get("content", "")
-                if piece:
-                    parts.append(piece)
-                    yield sse("token", {"text": piece})
-                if chunk.get("done"):
-                    break
+            if use_tools:
+                for event in toolchat.run(messages, model=model, conversation_id=conv_id,
+                                          provider=which):
+                    kind = event.pop("type")
+                    if kind == "token":
+                        piece = event.get("text", "")
+                        if piece:
+                            parts.append(piece)
+                            if first_token is None:
+                                first_token = time.time() - started
+                            yield sse("token", {"text": piece})
+                    elif kind == "answer":
+                        text = event.get("text", "")
+                        # Already streamed token by token; sending it again
+                        # would duplicate the whole answer in the transcript.
+                        if text and not event.get("streamed"):
+                            parts.append(text)
+                            if first_token is None:
+                                first_token = time.time() - started
+                            yield sse("token", {"text": text})
+                    else:
+                        # tools / tool_call / tool_result / tool_approval go to
+                        # the interface as themselves, so the user sees which
+                        # tool ran and what it returned.
+                        yield sse(kind, event)
+            else:
+                for chunk in llm.chat_stream(messages, model=model, which=which):
+                    piece = chunk.get("message", {}).get("content", "")
+                    if piece:
+                        parts.append(piece)
+                        if first_token is None:
+                            first_token = time.time() - started
+                        yield sse("token", {"text": piece})
+                    if chunk.get("done"):
+                        break
+        except toolchat.ToolChatError as exc:
+            yield sse("error", {"code": "tool_error", "detail": str(exc)[:300]})
+            return
         except llm.LLMError as exc:
             # The code is a stable token the interface translates; the detail
             # is the provider's own words, which is what makes a bad key or an
@@ -325,7 +630,16 @@ def post_chat(req: Request) -> Response:
         text = "".join(parts).strip()
         if text:
             conversations.append(conv_id, "assistant", text, language=lang)
-        yield sse("done", {"conversation_id": conv_id, "text": text})
+        # The timings go to the interface so a slow turn can be told apart
+        # from a slow model: a large ms_first_token with a small ms_total
+        # means the model was thinking, the other way round means JARVIS was.
+        yield sse("done", {
+            "conversation_id": conv_id,
+            "text": text,
+            "ms_first_token": int(first_token * 1000) if first_token is not None else None,
+            "ms_total": int((time.time() - started) * 1000),
+            "chars": len(text),
+        })
 
     return Response(stream=stream(), content_type="text/event-stream; charset=utf-8")
 
@@ -336,7 +650,11 @@ def post_chat(req: Request) -> Response:
 
 @router.get("/api/armory")
 def get_armory(req: Request) -> Response:
-    return Response({"connections": armory.list_connections(), "tools": armory.all_tools()})
+    return Response({
+        "connections": armory.list_connections(),
+        "tools": armory.all_tools(),
+        "presets": armory.bundled_presets(),
+    })
 
 
 @router.post("/api/armory")

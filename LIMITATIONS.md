@@ -208,3 +208,199 @@ they hold.
   and microphone on other devices, because they require a secure context.
 * `window.close()` after EXIT only works if the page was opened as a PWA or by
   a script; in a normal tab the interface closes and the tab stays.
+
+---
+
+## Claude Code on Termux — the honest answer
+
+**Android is not an Anthropic-supported platform for Claude Code.** The
+documented systems are macOS 13+, Windows 10 1809+, Ubuntu 20.04+, Debian 10+
+and Alpine 3.19+. The published builds — native installer and npm alike — are
+`linux-arm64` (glibc) and `linux-arm64-musl`; Termux is Android with Bionic
+libc, so neither runs there unmodified.
+
+Community routes exist (a patched ELF loader, `glibc-runner`, or a proot
+Ubuntu chroot that gives the normal installer a real glibc userland). They are
+third-party and none of them is something this project can vouch for.
+
+What JARVIS therefore does:
+
+| Situation | What you see |
+|---|---|
+| `claude` on PATH and it runs | The card shows the real version and path, and the controls work |
+| `claude` missing | The card states that, with no switch to press |
+| `claude` present but won't execute | The card reports the actual `exec` error — the usual shape of the ABI mismatch |
+| Any Termux install | An amber note explaining that the platform is unsupported and what the community routes are |
+
+**Verified in this session:** detection against the real CLI (2.1.311 at
+`/opt/node22/bin/claude`) on Linux x86_64. The run path — argument building,
+subprocess, JSON parsing, the approval gate — is covered by
+`tools/test_connections.py` against a stub `claude`, so the whole bridge is
+exercised without a billed model call.
+
+**Not verified:** a Claude Code run on an actual Termux install on the Galaxy
+S25 Ultra. No Android device was available here, and per the above there is no
+supported way to get the binary there.
+
+## Claude (Anthropic API) — verified
+
+Unlike `api.openai.com`, which this build environment's proxy blocks,
+`api.anthropic.com` is reachable from here, so the Claude provider was tested
+against the live API:
+
+| What | How it was verified |
+|---|---|
+| Key storage | written to `~/.jarvis/secrets.json`, mode 600, absent from `/api/config`, the status payload and every error string |
+| Rejected key | a deliberately invalid key produced a real 401, mapped to `auth`, and surfaced in the interface as "Neconectat: invalid x-api-key" |
+| Cost gate | `llm_provider: "claude"` falls back to `ollama` unless the connection is enabled *and* the cost notice acknowledged — enforced in `config._clamp_v21()`, not only in the UI |
+| Error mapping | all eight documented HTTP failures map to codes the interface translates |
+| Message translation | system prompt hoisted, images as base64 blocks, consecutive same-role turns merged |
+
+**Not verified:** a successful billed completion. No valid Anthropic key was
+used, because spending money is the user's decision.
+
+## FULL SCREEN
+
+| What | How it was verified |
+|---|---|
+| Enter | `requestFullscreen({navigationUI:'hide'})` engages; `document.fullscreenElement` set |
+| Button hides in fullscreen | asserted |
+| EXIT pill | appears on entry, fades after ~3.2s, returns on any tap |
+| Exit restores | `document.fullscreenElement` cleared, button returns, layout byte-identical |
+| Immersive still works | FACE + tap-to-expand unaffected |
+| No API | with `requestFullscreen` and `fullscreenEnabled` removed, `enter()` returns false, the button hides, and a toast explains — it never claims success |
+
+**Not verified on hardware:** Android Chrome's own handling of the status bar
+and gesture bar, and the installed PWA. Chromium desktop was used here.
+
+## Shortcuts, clock and ambient layers — verified
+
+| What | How it was verified |
+|---|---|
+| Shortcut targets | OpenAI → `https://chatgpt.com/`, GitHub → `https://github.com/`, both `target="_blank"` with `rel="noopener noreferrer"` |
+| Custom shortcuts | typed into the real Settings fields, saved, and the top bar repainted with the new name and address |
+| URL validation | `javascript:alert(1)` refused by the backend, slot stayed a `+`, and the interface explained why |
+| Empty slot | shows `+` and opens Settings when tapped |
+| Clock | `HH:MM:SS`, ticks, date beneath, and showed London time while the browser's own zone was Europe/Bucharest |
+| Clock placement | centred on the dial's axis to within a pixel, above it, and the dial's geometry is unchanged |
+| Particles | ~898 at full quality; mean displacement over 1.2s was 0.2px against ~4px travelled per mote, i.e. no net direction |
+| Particle cost | 0.10 ms/frame measured against the same scene with the layer stopped |
+| Edge pulse | `animation-name: edge-run` running in both modes |
+| Chat panel | identical `background-color` in normal and full screen |
+| Cinematic scene | off in normal mode, on in full screen, off again on exit while the particles keep running |
+
+**Not verified on hardware:** real frame rates. This container has only
+SwiftShader, a CPU rasteriser, where the dial alone measures 15fps — so the
+absolute numbers mean nothing and only the *difference* between layers is
+informative. The 0.10 ms figure is that difference.
+
+## Particle depth and the status border — verified
+
+| What | How it was verified |
+|---|---|
+| Count | 2,218 motes at 412×915, across all five depth bands |
+| Depth | near band 1.24px at 4.47px/s against far band 0.44px at 1.24px/s — size and parallax both scale with depth |
+| No net drift | mean displacement a fraction of a pixel against ~4px travelled per mote over 1.2s |
+| Chat panel | canvas read back: 0 lit pixels inside the panel, 3,267 in a strip outside it |
+| Cost | 0.10 ms/frame against the same scene with the layer stopped, unchanged from 900 motes |
+| Border colour | red at idle, green for listening / thinking / speaking, red again in standby even with an activity still set |
+| Border animation | `animation-name: edge-run` still running in every state |
+
+## Shared RINGS/FACE background — verified
+
+| What | How it was verified |
+|---|---|
+| Same background | with the visualiser hidden, a pure-background region of the stage is byte-identical in both modes (diff bbox `None`, max channel delta 0) |
+| Stage styling | identical computed `background-image` in both modes |
+| Mode switch | RINGS shows the 2D canvas with the GL one hidden, FACE the reverse |
+| The face still renders | bust, irises, scan band and mesh overlay all present after the wash was removed |
+
+The first comparison attempt failed on a region that included the stage's
+top-right corner, where the hologram card and the control rail overlap it —
+those differ between frames because they animate, not because the background
+does. The region was narrowed to one only the background occupies.
+
+## The box behind the rings — verified gone
+
+| What | How it was verified |
+|---|---|
+| Stage backing layer | computed `background-image` is `none` |
+| Left edge | strip crossing it, clear of the status rail, reads flat — max step 1 |
+| Bottom edge | strip crossing it reads flat — max step 1 |
+| The dial still draws | 1,693 lit samples in the rings canvas after the change |
+| RINGS/FACE still match | the shared-background comparison still passes |
+
+The first left-edge probe was placed over the status rail and read its chips
+rather than the background; it was moved below the rail before the result was
+trusted.
+
+## MCP tool calling — verified
+
+| What | How it was verified |
+|---|---|
+| stdio handshake | real `initialize` + `tools/list` against `tools/fs_mcp_server.py` |
+| Catalogue | all 5 tools reach the model, namespaced per connection, server schema passed through |
+| The model is handed them | the stub recorded 5 tool definitions in the request body |
+| `list_directory` | ran for real; the card and the answer both carry the actual directory contents |
+| A mutating call | refused, approval raised, **nothing written to disk** — checked by listing the directory before and after |
+| After approval | the write ran and `notes/new.txt` existed with the right contents |
+| Approval is single-use | the second identical request was refused again |
+| Path traversal | `../../../../etc/passwd` refused by the server's root check |
+| A missing file | reported as `ERROR`, never as success |
+| A disconnected server | reported as "the tool did not run — not connected" |
+| Layout | dial 275, toggle 275, no scrolling — unchanged |
+
+**Stubbed, and why:** the language model. There is no Ollama in this
+container, so a small HTTP server answers `/api/chat` the way Ollama does with
+tools. Everything this project owns runs for real; the one part that cannot
+run locally is the only part faked. The stub reads the tool output back into
+its reply, so a check asserting the listing arrived cannot pass without it.
+
+**Not verified on hardware:** a real Ollama choosing to call a tool. Whether
+`llama3.2:3b` reliably emits `tool_calls` for a given prompt is a property of
+the model, not of this code. The wiring is proven; the model's judgement is
+not something a test here can establish.
+
+## Web research — verified, and not
+
+Run `python3 tools/test_websearch.py` (88 checks).
+
+| What | How it was verified |
+|---|---|
+| stdio handshake | real `initialize` + `tools/list` against `tools/web_mcp_server.py`; 4 tools, annotations intact |
+| Search parsing | DuckDuckGo HTML, SearXNG JSON and Wikipedia API fixtures; redirect wrapper unwrapped, snippets paired to their links, `javascript:` links dropped, `limit` honoured |
+| Page reading | title and prose extracted; `<script>`, `<style>`, `<nav>` and `<footer>` contents dropped; `&nbsp;` read as a space; 2 MB and `max_chars` caps enforced |
+| Redirects | followed, and the **final** URL reported rather than the one asked for |
+| The address guard | tested **unpatched** against loopback, `localhost`, `[::1]`, 10/172.16/192.168, 169.254, 100.64, 0.0.0.0, `file://`, `ftp://` |
+| Redirect re-checking | a page redirecting to `http://10.0.0.1/` is refused at the second hop |
+| Through the running app | the Armory UI: preset → save → **real connect** → catalogue; `fetch_url` on `http://127.0.0.1:8787/api/config` refused as loopback |
+| Approval gating | `web_search` / `wikipedia` / `fetch_url` read-only; `download_file` gated — read off the live `/api/chat/tools` catalogue |
+| A lying annotation | `readOnlyHint: true` on `delete_everything`, `write_file`, `run_shell` is ignored; all three still need approval |
+| Downloads | a real file written to disk; `../../escape.sh` stayed inside the folder; shell characters stripped from the name |
+| A failed call | an `isError` result reports `ran: false`, not a green "ran in Nms" card |
+| Layout | dial still 275px, RINGS/FACE bar still matches it, page still does not scroll |
+
+**Not verified: any live search or fetch.** The build machine's egress proxy
+answers 403 to `CONNECT` for `html.duckduckgo.com`, `lite.duckduckgo.com`,
+`api.duckduckgo.com`, `en.wikipedia.org` and the SearXNG instance tried, so
+every network call went to a local fixture. The fixture returns the documented
+shapes, not a recording of a live response — if DuckDuckGo's markup has
+changed since, `web_search` will return "No results" rather than wrong ones,
+and `_DDG_LINK` / `_DDG_SNIPPET` are the two lines to adjust.
+
+The address guard could not be tested against the fixture and the real guard
+at once: the fixture can only live on loopback, which is what the guard
+exists to refuse. So the guard is tested unpatched against literal addresses,
+and the fetching and parsing are tested with loopback temporarily permitted.
+Both halves are covered; neither patch can hide the other.
+
+## Tools on OpenAI and Claude, and routing — verified, and not
+
+| Claim | Status |
+|---|---|
+| Tool calls streamed by OpenAI and Claude are reassembled and executed | **Verified against stand-ins** that stream the documented event shapes, fragmented the way the real APIs fragment them. |
+| The replayed tool round is in each API's own shape | **Verified** by reading back the exact request bodies. |
+| A live OpenAI or Claude completion with tools | **Not verified.** Neither API is reachable from the build machine, and no real key was used. The wire format follows the documentation; confirm it on the phone with one short question while an MCP server is connected. |
+| Routing never bills an unauthorised provider | **Verified**: with keys stored but no cost acknowledgement, Cloud and Automatic both stay on Ollama. |
+| Automatic notices Ollama going away | **Verified** against a stopped and a running stub, and a running one missing its model. A decision is reused for up to 15 seconds, so a turn sent the instant Ollama stops can still be routed to it and fail once. |
+

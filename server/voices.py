@@ -207,25 +207,107 @@ def _find_espeak_data() -> Path | None:
 # installed voices
 # --------------------------------------------------------------------------
 
+def _config_for(model: Path) -> Path | None:
+    """
+    The companion JSON for a model file, under either name in the wild.
+
+    Piper publishes `<name>.onnx` beside `<name>.onnx.json`, but a voice
+    copied by hand or fetched with a tool that strips the double extension
+    arrives as `<name>.json`. Both are the same file; refusing the second
+    reported an installed, working voice as missing.
+    """
+    for candidate in (
+        model.with_name(model.name + ".json"),       # name.onnx.json
+        model.with_suffix(".json"),                  # name.json
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _scan() -> dict[str, tuple[Path, Path]]:
+    """
+    Every usable voice under the voices directory, by id.
+
+    Searched recursively, because a voice downloaded from HuggingFace lands
+    in the publisher's own tree (`en/en_GB/alan/medium/en_GB-alan-medium.onnx`)
+    rather than flat in the folder. The previous scan looked only at the top
+    level, so a correctly installed Alan was invisible and JARVIS fell back to
+    the device's own voice without saying so.
+
+    The id is the filename stem, so `.../en_GB-alan-medium.onnx` is
+    `en_GB-alan-medium` wherever it sits. A duplicate keeps the shallowest
+    copy, which is the one a download would have written.
+    """
+    root = paths.VOICES_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    found: dict[str, tuple[Path, Path]] = {}
+    for model in sorted(root.rglob("*"), key=lambda p: (len(p.parts), str(p))):
+        # Case-insensitive: a file copied off a phone or a FAT card can
+        # arrive as .ONNX, which is the same model.
+        if not model.is_file() or model.suffix.lower() != ".onnx":
+            continue
+        cfg = _config_for(model)
+        if cfg is None:
+            continue
+        found.setdefault(model.stem, (model, cfg))
+    return found
+
+
 def _model_paths(voice_id: str) -> tuple[Path, Path]:
+    """Where this voice's files are, or where a download should put them."""
+    entry = _scan().get(voice_id)
+    if entry is not None:
+        return entry
     base = paths.VOICES_DIR / voice_id
-    return base.with_suffix(".onnx"), base.with_suffix(".onnx.json")
+    return base.with_suffix(".onnx"), base.with_name(voice_id + ".onnx.json")
 
 
 def is_installed(voice_id: str) -> bool:
     if not voice_id or not _SAFE_ID.match(voice_id):
         return False
-    model, cfg = _model_paths(voice_id)
-    return model.is_file() and cfg.is_file()
+    return voice_id in _scan()
 
 
 def installed_voices() -> list[str]:
-    paths.VOICES_DIR.mkdir(parents=True, exist_ok=True)
-    out = []
-    for model in sorted(paths.VOICES_DIR.glob("*.onnx")):
-        if model.with_suffix(".onnx.json").is_file():
-            out.append(model.stem)
-    return out
+    return sorted(_scan())
+
+
+def diagnostics() -> dict[str, Any]:
+    """
+    What is on disk, and where it was looked for.
+
+    This exists because "Not installed" for a voice the user installed
+    themselves is impossible to debug from a phone. It reports the search
+    root, every model file found with its real path, and any model that was
+    skipped for a missing config — so the answer is visible rather than
+    guessed at.
+    """
+    root = paths.VOICES_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    found = _scan()
+    orphans = []
+    for model in sorted(root.rglob("*")):
+        if model.is_file() and model.suffix.lower() == ".onnx" and _config_for(model) is None:
+            orphans.append({
+                "path": str(model.relative_to(root)),
+                "problem": "no .onnx.json or .json config beside it",
+            })
+    return {
+        "root": str(root),
+        "root_exists": root.is_dir(),
+        "voices": [
+            {
+                "id": vid,
+                "path": str(model.relative_to(root)),
+                "size_mb": round(model.stat().st_size / 1_000_000, 1),
+                "config": str(cfg.relative_to(root)),
+            }
+            for vid, (model, cfg) in sorted(found.items())
+        ],
+        "unusable": orphans,
+        "engine": engine_info(),
+    }
 
 
 def catalog() -> dict[str, Any]:
@@ -244,6 +326,77 @@ def catalog() -> dict[str, Any]:
     return out
 
 
+def _speaker(voice_id: str) -> str:
+    """The speaker name out of a Piper id: `en_GB-alan-medium` -> `alan`."""
+    parts = (voice_id or "").split("-")
+    return parts[1].lower() if len(parts) >= 2 else ""
+
+
+#: Speaker name -> gender, built from the catalogue. Used to recognise a
+#: voice whose exact id is not catalogued — a legacy `en_US-alan-medium` from
+#: an older install is still Alan, and still male.
+_GENDER_BY_SPEAKER = {
+    _speaker(v["id"]): v["gender"]
+    for group in CATALOG.values() for v in group if v.get("gender")
+}
+
+
+def gender_of(voice_id: str) -> str:
+    """"male", "female", or "" when genuinely unknown — never guessed."""
+    for group in CATALOG.values():
+        for voice in group:
+            if voice["id"] == voice_id:
+                return voice.get("gender") or ""
+    return _GENDER_BY_SPEAKER.get(_speaker(voice_id), "")
+
+
+def voices_for(language: str) -> list[dict[str, Any]]:
+    """
+    Every voice offered for a language: catalogued first, then anything else
+    installed for it, so a voice kept from an older install is selectable
+    rather than merely tolerated.
+    """
+    present = _scan()
+    out: list[dict[str, Any]] = []
+    seen = set()
+    for voice in CATALOG.get(language, []):
+        out.append({
+            **{k: v for k, v in voice.items() if k not in ("url", "config_url")},
+            "installed": voice["id"] in present,
+        })
+        seen.add(voice["id"])
+    for vid in _installed_for_language(language):
+        if vid in seen:
+            continue
+        out.append({
+            "id": vid,
+            "label": vid,
+            "gender": gender_of(vid),
+            "quality": vid.rsplit("-", 1)[-1] if "-" in vid else "",
+            "installed": True,
+            "uncatalogued": True,
+        })
+    return out
+
+
+def genders_for(language: str) -> dict[str, list[str]]:
+    """
+    Which genders a language can actually speak in right now.
+
+    Only installed voices count. A language with no installed voice of a
+    gender has no entry, which is what lets the interface say "only a male
+    voice is available offline for Romanian" instead of offering a choice
+    that cannot be honoured.
+    """
+    out: dict[str, list[str]] = {}
+    for voice in voices_for(language):
+        if not voice["installed"]:
+            continue
+        gender = voice.get("gender") or "unknown"
+        out.setdefault(gender, []).append(voice["id"])
+    return out
+
+
 def _installed_for_language(language: str) -> list[str]:
     """Any installed model whose filename starts with the language code.
 
@@ -254,28 +407,72 @@ def _installed_for_language(language: str) -> list[str]:
     return [vid for vid in installed_voices() if vid.lower().startswith(prefix)]
 
 
-def resolve_voice(language: str, override: str = "", mapping: dict[str, str] | None = None) -> dict[str, Any]:
-    """Pick the voice to use, and say exactly why, so the UI can show a
-    truthful fallback message instead of failing silently."""
+def resolve_voice(
+    language: str,
+    override: str = "",
+    mapping: dict[str, str] | None = None,
+    gender_mapping: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """
+    Pick the voice to use, and say exactly why.
+
+    Every answer carries `reason` and `gender` so the interface can state
+    what is actually speaking. A requested gender that has no installed voice
+    is reported as `gender_unavailable` rather than quietly answered with the
+    other one — being told "no female Romanian voice is installed" is useful,
+    being handed a male voice without a word is not.
+    """
     mapping = mapping or {}
-    if override:
+    gender_mapping = gender_mapping or {}
+
+    def answer(voice_id: str, reason: str, **extra: Any) -> dict[str, Any]:
         return {
-            "voice": override,
-            "installed": is_installed(override),
-            "reason": "manual",
+            "voice": voice_id,
+            "installed": is_installed(voice_id),
+            "reason": reason,
+            "gender": gender_of(voice_id),
+            "label": next(
+                (v["label"] for v in voices_for(language) if v["id"] == voice_id),
+                voice_id,
+            ),
+            **extra,
         }
+
+    if override:
+        return answer(override, "manual")
+
+    wanted_gender = (gender_mapping.get(language) or "").strip().lower()
+    if wanted_gender in ("male", "female"):
+        matches = [
+            v for v in voices_for(language)
+            if v["installed"] and (v.get("gender") or "") == wanted_gender
+        ]
+        if matches:
+            # A voice explicitly chosen for this language wins, as long as it
+            # is of the gender asked for.
+            preferred = mapping.get(language) or ""
+            pick = next((v for v in matches if v["id"] == preferred), matches[0])
+            return answer(pick["id"], "gender")
+        available = sorted(g for g in genders_for(language) if g != "unknown")
+        return {
+            "voice": "", "installed": False, "reason": "gender_unavailable",
+            "gender": "", "label": "",
+            "wanted_gender": wanted_gender, "available_genders": available,
+        }
+
     preferred = mapping.get(language) or ""
     if preferred and is_installed(preferred):
-        return {"voice": preferred, "installed": True, "reason": "configured"}
+        return answer(preferred, "configured")
     for voice in CATALOG.get(language, []):
         if is_installed(voice["id"]):
-            return {"voice": voice["id"], "installed": True, "reason": "auto"}
+            return answer(voice["id"], "auto")
     # Nothing from the catalog: fall back to any voice the user already has for
     # this language (e.g. a model kept from a previous JARVIS install).
     existing = _installed_for_language(language)
     if existing:
-        return {"voice": existing[0], "installed": True, "reason": "existing"}
-    return {"voice": preferred, "installed": False, "reason": "missing"}
+        return answer(existing[0], "existing")
+    return {"voice": preferred, "installed": False, "reason": "missing",
+            "gender": gender_of(preferred), "label": preferred}
 
 
 # --------------------------------------------------------------------------
@@ -341,7 +538,9 @@ def synthesize(text: str, voice_id: str, speed: float = 1.0) -> bytes:
     if not info["available"]:
         raise RuntimeError(info["error"] or "sherpa-onnx unavailable")
     engine = _get_engine(voice_id)
-    audio = engine.generate(text[:1200], sid=0, speed=max(0.5, min(2.0, speed)))
+    # Down to 0.3: the old 0.5 floor was not slow enough to follow a long
+    # answer in a second language, which is what the slider is for.
+    audio = engine.generate(text[:1200], sid=0, speed=max(0.3, min(2.0, speed)))
     return _wav_bytes(audio.samples, audio.sample_rate)
 
 
