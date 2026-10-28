@@ -97,6 +97,19 @@ export const api = {
   chatToolApprove: (id, approve = true) =>
     request('/api/chat/tools/approve', { method: 'POST', body: { id, approve } }),
 
+  // --- the workspace: real folders, real files -----------------------
+  workspace: (depth = 2) => request('/api/workspace?depth=' + depth),
+  workspaceList: (path = '') =>
+    request('/api/workspace/list?path=' + encodeURIComponent(path)),
+  workspaceFile: (path) =>
+    request('/api/workspace/file?path=' + encodeURIComponent(path)),
+  workspaceWrite: (path, text) =>
+    request('/api/workspace/file', { method: 'POST', body: { path, text } }),
+  workspaceActive: (path, reason = '') =>
+    request('/api/workspace/active', { method: 'POST', body: { path, reason } }),
+  workspaceJournal: (entry, kind = 'note') =>
+    request('/api/workspace/journal', { method: 'POST', body: { entry, kind } }),
+
   voices: () => request('/api/voices'),
   downloadVoice: (voice) => request('/api/voices/download', { method: 'POST', body: { voice, confirm: true } }),
   downloadStatus: (voice) => request('/api/voices/download/' + encodeURIComponent(voice)),
@@ -207,4 +220,6 @@ function dispatch(frame, handlers) {
   else if (event === 'tool_call') handlers.onToolCall?.(data);
   else if (event === 'tool_result') handlers.onToolResult?.(data);
   else if (event === 'tool_approval') handlers.onToolApproval?.(data);
+  // Which workspace folder this turn is about, so its sphere can light up.
+  else if (event === 'workspace') handlers.onWorkspace?.(data);
 }

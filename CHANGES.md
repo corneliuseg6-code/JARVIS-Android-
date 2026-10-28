@@ -2,6 +2,76 @@
 
 ---
 
+# V4 Phase 1e — the workspace and the holographic folder network
+
+The folder network needed somewhere real to point at, so the workspace came
+first. Both are real: a sphere on screen is a folder on disk.
+
+## The workspace — `server/workspace.py`
+
+`~/.jarvis/workspace/` with seven sections — Projects, Research, Documents,
+Notes, Tasks, Results, Journal — created on first use and never silently
+emptied. Ordinary files the user can open with anything; this is a directory,
+not a database pretending to be one.
+
+Two rules hold throughout. **Nothing escapes the root**: every path is
+resolved and checked against the workspace, so `..`, an absolute path and a
+symlink pointing out are all refused — JARVIS may write here without asking,
+which is only safe because "here" cannot be talked into meaning somewhere
+else. And **deleting is not writing**: `delete()` is separate, the API
+requires `confirm`, and a section can never be removed.
+
+One defect found while testing: `/etc/passwd` was being silently rewritten to
+`etc/passwd` *inside* the workspace, because the absolute-path check ran after
+the leading slash was stripped. Not an escape, but it answered a different
+question than the one asked. Checked before stripping now.
+
+Also: a work journal (one file per day, appended), export, and a timestamped
+backup copy.
+
+## The folder network — `web/js/ui/folders.js`
+
+A new FOLDERS tab in the collapsible panel, beside CHAT. Glowing cyan spheres
+joined by luminous lines, drifting slowly, drawn in canvas 2D with
+hand-projected 3D positions — the avatar already owns the WebGL context, a
+canvas can only have one kind, and a few dozen spheres do not need a GPU.
+Depth is carried by size, brightness and draw order, which is also what keeps
+it cheap on a phone.
+
+- **Tap a sphere** and it swells and lists what is really inside it. Tapping a
+  file drops its real contents into the conversation.
+- **JARVIS's own work moves the highlight.** When a tool runs against a
+  workspace path, or a real folder name appears in the answer, that sphere
+  takes the highlight and the previous one eases out of it — both animate, so
+  it reads as the highlight moving rather than blinking. Matched against
+  folders that exist, so a name JARVIS invented lights nothing up.
+- Positions derive from each node's place in the tree, so a folder does not
+  jump to a different corner on every refresh.
+- The network stops animating when the tab is not showing.
+
+## Verified
+
+`tools/test_workspace.py` — 78 checks: the boundary (parent steps, absolute
+paths, null bytes, a symlink pointing out), reading and writing, the tree and
+its links, the active-folder rules, deletion, the journal, export and backup.
+
+In the running app against a real workspace on disk: **all 11 real folders
+drawn and no invented ones**, 10 links matching the real parent/child
+relationships, 54 315 lit pixels on the canvas, tapping `Projects` enlarged it
+1.00 → 1.42 and revealed its real contents, and the highlight moved
+`Projects/Mars Rover` (1.78) → `Research` (1.78) with the first easing back to
+1.06. Input bar unmoved at y 868; dial still 275 px; no page scroll.
+
+Two defects the test caught: the canvas measured 0×0 because it is inside a
+hidden panel at boot, so the draw loop bailed forever on a zero width (now
+watched with a `ResizeObserver`); and the client asked for depth 2 while the
+layout can draw three levels, so the deepest folders were missing.
+
+**Not verified:** how this feels under a real finger, and the workspace has
+never been exercised by a real model writing into it — only by the tests.
+
+---
+
 # V4 Phase 1d — one continuous background behind the collapsed panel
 
 The requirement: when the conversation slides away, what it uncovers must be

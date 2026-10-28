@@ -10,7 +10,7 @@ from typing import Any, Iterator
 
 from . import (
     anthropic_client, armory, claude_code, config, conversations, llm, ollama,
-    openai_client, paths, toolchat, vision, voices,
+    openai_client, paths, toolchat, vision, voices, workspace,
 )
 
 #: Which secret store entry belongs to which provider. Keeping the mapping in
@@ -587,6 +587,14 @@ def post_chat(req: Request) -> Response:
                         # the interface as themselves, so the user sees which
                         # tool ran and what it returned.
                         yield sse(kind, event)
+                        # A tool working on a path inside the workspace is the
+                        # clearest signal of which project is live.
+                        if kind == "tool_call":
+                            spotted = workspace.detect(json.dumps(event.get("arguments") or {}))
+                            if spotted and spotted != workspace.active().get("path"):
+                                workspace.set_active(spotted, f"{event.get('tool', 'a tool')} is running")
+                                yield sse("workspace", {"active": spotted,
+                                                        "reason": "tool"})
             else:
                 for chunk in llm.chat_stream(messages, model=model):
                     piece = chunk.get("message", {}).get("content", "")
@@ -616,6 +624,15 @@ def post_chat(req: Request) -> Response:
         text = "".join(parts).strip()
         if text:
             conversations.append(conv_id, "assistant", text, language=lang)
+        # Which project was this about? Matched against folders that really
+        # exist, so a name JARVIS invented lights nothing up.
+        try:
+            spotted = workspace.detect(text)
+            if spotted and spotted != workspace.active().get("path"):
+                workspace.set_active(spotted, "discussed in conversation")
+                yield sse("workspace", {"active": spotted, "reason": "mentioned"})
+        except Exception:  # noqa: BLE001 - highlighting must never break a reply
+            pass
         # The timings go to the interface so a slow turn can be told apart
         # from a slow model: a large ms_first_token with a small ms_total
         # means the model was thinking, the other way round means JARVIS was.
@@ -745,3 +762,104 @@ def post_log(req: Request) -> Response:
     line = json.dumps({"level": data.get("level", "error"), "msg": data.get("message", "")[:500]})
     sys.stderr.write(f"[frontend] {line}\n")
     return Response({"ok": True})
+
+
+# --------------------------------------------------------------------------
+# the workspace — JARVIS's own desk
+# --------------------------------------------------------------------------
+
+@router.get("/api/workspace")
+def get_workspace(req: Request) -> Response:
+    """The folder network: every folder, and the links between them."""
+    try:
+        depth = int(req.q("depth") or 2)
+    except (TypeError, ValueError):
+        depth = 2
+    data = workspace.tree(depth)
+    data["active"] = workspace.active()
+    data["status"] = workspace.status()
+    return Response(data)
+
+
+@router.get("/api/workspace/list")
+def get_workspace_list(req: Request) -> Response:
+    """What a tapped folder reveals."""
+    try:
+        return Response(workspace.listing(req.q("path")))
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+@router.get("/api/workspace/file")
+def get_workspace_file(req: Request) -> Response:
+    try:
+        return Response(workspace.read(req.q("path")))
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+@router.post("/api/workspace/file")
+def post_workspace_file(req: Request) -> Response:
+    data = req.json()
+    try:
+        return Response(workspace.write(data.get("path") or "", data.get("text") or ""))
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+@router.post("/api/workspace/folder")
+def post_workspace_folder(req: Request) -> Response:
+    try:
+        return Response(workspace.make_folder(req.json().get("path") or ""), status=201)
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+@router.delete("/api/workspace/file")
+def delete_workspace_file(req: Request) -> Response:
+    """
+    Deleting needs saying so outright.
+
+    JARVIS writes here freely, but removing something the user put here is
+    the one workspace action that cannot be undone, so it is refused unless
+    the request carries `confirm`.
+    """
+    data = req.json() if req.body else {}
+    if not data.get("confirm"):
+        raise HttpError(400, "confirm_required")
+    try:
+        return Response(workspace.delete(data.get("path") or ""))
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+@router.post("/api/workspace/active")
+def post_workspace_active(req: Request) -> Response:
+    """Light up the folder being worked on."""
+    data = req.json()
+    try:
+        return Response(workspace.set_active(data.get("path") or "", data.get("reason") or ""))
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+@router.post("/api/workspace/journal")
+def post_workspace_journal(req: Request) -> Response:
+    data = req.json()
+    entry = (data.get("entry") or "").strip()
+    if not entry:
+        raise HttpError(400, "entry is required")
+    return Response(workspace.journal(entry, kind=data.get("kind") or "note"))
+
+
+@router.get("/api/workspace/export")
+def get_workspace_export(req: Request) -> Response:
+    return Response(workspace.export())
+
+
+@router.post("/api/workspace/backup")
+def post_workspace_backup(req: Request) -> Response:
+    try:
+        return Response(workspace.backup())
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc

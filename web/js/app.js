@@ -32,8 +32,15 @@ import Shortcuts from './ui/shortcuts.js';
 import Clock from './ui/clock.js';
 import Backdrop from './ui/backdrop.js';
 import Modes from './ui/modes.js';
+import Folders from './ui/folders.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
+
+// The live module instances, reachable from the console. Handy when
+// something looks wrong on the phone and there is no debugger attached, and
+// it is what lets a test assert against the real objects rather than
+// re-deriving their state from the DOM.
+window.__jarvis = undefined;
 
 const app = {
   avatar: null, mic: null, voice: null, power: null, magnifier: null,
@@ -346,6 +353,17 @@ async function boot() {
     voice: app.voice,
     onActivity: setActivity,
   }));
+  // The folder network. Built after the chat so it can be handed to the
+  // panel that shows it, and left stopped until the FOLDERS tab is opened —
+  // an animation nobody is looking at is a battery leak.
+  app.folders = guard('folders', () => new Folders({
+    onOpenFile: (path) => app.chat?.openWorkspaceFile?.(path),
+  }));
+  if (app.chat && app.folders) {
+    app.chat.attachFolders(app.folders);
+    app.folders.stop();
+  }
+  window.__jarvis = app;
   app.armory = guard('armory', () => new Armory());
   app.connections = guard('connections', () => new Connections({
     onConfigChange: (next) => {

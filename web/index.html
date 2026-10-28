@@ -213,6 +213,15 @@
       <span class="chat-grip-bar" aria-hidden="true"></span>
     </button>
     <div class="chat-head">
+      <!-- One panel, two views: the conversation, and the workspace as a
+           network of real folders. -->
+      <div class="panel-tabs" role="tablist">
+        <button class="panel-tab is-on" id="tab-chat" type="button" role="tab"
+                aria-selected="true" aria-controls="messages" data-i18n="chat.tabChat">CHAT</button>
+        <button class="panel-tab" id="tab-folders" type="button" role="tab"
+                aria-selected="false" aria-controls="folders-panel"
+                data-i18n="chat.tabFolders">FOLDERS</button>
+      </div>
       <button class="btn btn-ghost btn-sm" id="btn-history" type="button" data-i18n="chat.history">History</button>
       <button class="btn btn-ghost btn-sm" id="btn-new-chat" type="button" data-i18n="chat.new">New</button>
     </div>
@@ -221,6 +230,20 @@
       <p class="empty" data-i18n="chat.empty"></p>
     </div>
     <div class="history-list" id="history-list" hidden></div>
+
+    <!-- The folder network. The canvas draws the workspace; the list under
+         it is what the selected folder really contains. -->
+    <div class="folders-panel" id="folders-panel" role="tabpanel"
+         aria-labelledby="tab-folders" hidden>
+      <canvas class="folder-canvas" id="folder-canvas"></canvas>
+      <p class="empty folder-empty" id="folder-empty" hidden></p>
+      <div class="folder-list-head">
+        <span class="folder-title" id="folder-title"></span>
+        <button class="btn btn-ghost btn-sm" id="btn-folder-refresh" type="button"
+                data-i18n="folders.refresh">Refresh</button>
+      </div>
+      <div class="folder-files" id="folder-files"></div>
+    </div>
   </section>
 
   </div><!-- /workspace -->

@@ -1354,3 +1354,68 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
     --avatar-h: clamp(110px, 16dvh, 170px);
   }
 }
+
+/* ===================== the folder network =====================
+   One panel, two views. The tabs sit in the chat head beside History and
+   New, so the panel gains a view without gaining a row. */
+.panel-tabs { display: flex; gap: 2px; margin-right: auto; }
+.panel-tab {
+  background: none; border: 1px solid transparent; border-radius: 999px;
+  padding: 2px 10px; cursor: pointer;
+  font-family: inherit; font-size: .58em; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--text-dim);
+  transition: color .18s ease, border-color .18s ease, background .18s ease;
+}
+.panel-tab.is-on {
+  color: var(--teal-soft);
+  border-color: rgba(70, 200, 205, .35);
+  background: rgba(67, 222, 210, .08);
+}
+
+/* The network takes the room the message list would have had. */
+.folders-panel {
+  display: flex; flex-direction: column; gap: 4px;
+  flex: 1 1 auto; min-height: 0;
+}
+.folders-panel[hidden] { display: none; }
+.folder-canvas {
+  display: block; width: 100%;
+  /* Tall enough to read the sphere layout, never so tall the file list is
+     pushed off a phone screen. */
+  flex: 0 0 auto; height: clamp(150px, 34vh, 260px);
+  touch-action: manipulation;   /* a tap is a tap, with no 300ms wait */
+}
+.folder-empty { font-size: .64em; color: var(--text-dim); text-align: center; }
+
+.folder-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px; flex: none;
+  border-top: 1px solid rgba(70, 200, 205, .12); padding-top: 3px;
+}
+.folder-title {
+  font-size: .60em; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--teal-soft); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-files {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px;
+  scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.folder-file {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 4px 6px; text-align: left;
+  background: none; border: 0; border-radius: 6px;
+  color: var(--text); font-family: inherit; font-size: .64em; cursor: pointer;
+}
+.folder-file:hover, .folder-file:focus-visible { background: rgba(67, 222, 210, .08); }
+.folder-file-ico { color: var(--teal-soft); flex: none; width: 1em; text-align: center; }
+.folder-file.is-folder .folder-file-name { color: var(--teal-soft); }
+.folder-file-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-file-meta { flex: none; font-size: .86em; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* Collapsed, the whole panel goes, folders and all. */
+.app[data-chat="collapsed"] .folders-panel { opacity: 0; pointer-events: none; }
+.folders-panel { transition: opacity .18s ease; }
+@media (prefers-reduced-motion: reduce) { .folders-panel { transition: none; } }

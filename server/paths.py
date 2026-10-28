@@ -20,10 +20,14 @@ CONNECTIONS_FILE = JARVIS_HOME / "connections.json"
 CONVERSATIONS_DIR = JARVIS_HOME / "conversations"
 VOICES_DIR = Path(os.environ.get("JARVIS_VOICES", JARVIS_HOME / "voices"))
 CAPTURES_DIR = JARVIS_HOME / "captures"
+# JARVIS's own desk: the only place it may write without being asked. Under
+# JARVIS_HOME like everything the user owns, never inside the source tree.
+WORKSPACE_DIR = Path(os.environ.get("JARVIS_WORKSPACE", JARVIS_HOME / "workspace"))
 LOG_DIR = JARVIS_HOME / "logs"
 RUN_DIR = JARVIS_HOME / "run"
 
-_DIRS = (JARVIS_HOME, CONVERSATIONS_DIR, VOICES_DIR, CAPTURES_DIR, LOG_DIR, RUN_DIR)
+_DIRS = (JARVIS_HOME, CONVERSATIONS_DIR, VOICES_DIR, CAPTURES_DIR, LOG_DIR,
+         RUN_DIR, WORKSPACE_DIR)
 
 
 def ensure_dirs() -> None:

@@ -40,6 +40,70 @@ export default class Chat {
     this.historyBtn?.addEventListener('click', () => this.toggleHistory());
 
     this._initCollapse();
+    this._initTabs();
+  }
+
+  /**
+   * CHAT and FOLDERS share the panel.
+   *
+   * Switching views does not touch the collapse state or the input bar; it
+   * swaps which child of the panel is showing, so the swipe-down gesture and
+   * the dock behave identically in both.
+   */
+  _initTabs() {
+    this.tabChat = document.getElementById('tab-chat');
+    this.tabFolders = document.getElementById('tab-folders');
+    this.foldersPanel = document.getElementById('folders-panel');
+    if (!this.tabChat || !this.tabFolders) return;
+
+    this.tabChat.addEventListener('click', () => this.showTab('chat'));
+    this.tabFolders.addEventListener('click', () => this.showTab('folders'));
+    document.getElementById('btn-folder-refresh')
+      ?.addEventListener('click', () => this.folders?.refresh());
+  }
+
+  /** Give the panel a Folders view to show. Wired at boot. */
+  attachFolders(folders) {
+    this.folders = folders;
+  }
+
+  /**
+   * Show a workspace file in the conversation.
+   *
+   * Tapping a file in the folder network drops its real contents into the
+   * transcript rather than opening a separate viewer: it is already the
+   * place JARVIS and the user read things together.
+   */
+  async openWorkspaceFile(path) {
+    try {
+      const file = await api.workspaceFile(path);
+      this.showTab('chat');
+      const body = this.addMessage('jarvis', '');
+      body.textContent = `${file.path}\n\n${file.text}`;
+      body.parentElement?.classList.add('msg-file');
+      this._follow(true);
+    } catch (err) {
+      toast(String(err?.message || err), 'error');
+    }
+  }
+
+  showTab(which) {
+    const folders = which === 'folders';
+    this.tab = which;
+    if (this.messages) this.messages.hidden = folders || !this.historyList?.hidden;
+    if (this.foldersPanel) this.foldersPanel.hidden = !folders;
+    if (this.historyList && folders) this.historyList.hidden = true;
+    this.tabChat?.classList.toggle('is-on', !folders);
+    this.tabFolders?.classList.toggle('is-on', folders);
+    this.tabChat?.setAttribute('aria-selected', String(!folders));
+    this.tabFolders?.setAttribute('aria-selected', String(folders));
+    // Only one of them needs to be animating.
+    if (folders) {
+      this.folders?.refresh();
+      if (this.collapsed) this.setCollapsed(false);
+    } else {
+      this.folders?.stop();
+    }
   }
 
   // ---------------------------------------------------------------- collapse
@@ -408,6 +472,11 @@ export default class Chat {
         onToolApproval: (data) => {
           closeSegment();
           this._toolApproval(data);
+        },
+        onWorkspace: (data) => {
+          // Move the highlight to the folder this turn is about. Silent,
+          // because the user did not ask to change folders — JARVIS did.
+          this.folders?.setActive(data.active || '', { silent: true });
         },
         onError: (data) => {
           if (!segment) segment = this._newSegment();
