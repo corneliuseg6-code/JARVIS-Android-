@@ -257,6 +257,86 @@ def chat_stream(
     yield {"message": {"content": ""}, "done": True}
 
 
+def chat_stream_full(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    timeout: float = 300.0,
+) -> Iterator[dict[str, Any]]:
+    """
+    Stream a turn and assemble the whole message, tool calls included.
+
+    The same contract as ``ollama.chat_stream_full``: ``{"type": "token"}``
+    events as text arrives, then one ``{"type": "message"}``. OpenAI sends a
+    tool call in fragments — the id and name first, the JSON arguments a few
+    characters at a time — keyed by an index, so they are stitched together
+    here and handed up already parsed.
+    """
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [_to_openai(m) for m in messages],
+        "stream": True,
+    }
+    if tools:
+        # The definitions are already in OpenAI's function shape; the tool
+        # loop builds them that way for Ollama, which copied the format.
+        payload["tools"] = tools
+
+    content: list[str] = []
+    calls: dict[int, dict[str, Any]] = {}
+    response = _request("/chat/completions", payload, timeout=timeout, stream=True)
+    with response:
+        for raw in response:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            for part in delta.get("tool_calls") or []:
+                slot = calls.setdefault(int(part.get("index") or 0),
+                                        {"id": "", "name": "", "arguments": ""})
+                fn = part.get("function") or {}
+                slot["id"] = part.get("id") or slot["id"]
+                slot["name"] += fn.get("name") or ""
+                slot["arguments"] += fn.get("arguments") or ""
+            piece = delta.get("content") or ""
+            if piece:
+                content.append(piece)
+                # Same rule as Ollama: text after a call is narration of it.
+                if not calls:
+                    yield {"type": "token", "text": piece}
+            if choices[0].get("finish_reason"):
+                break
+
+    assembled: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
+    if calls:
+        assembled["tool_calls"] = [
+            {"id": slot["id"], "type": "function",
+             "function": {"name": slot["name"], "arguments": _parse_arguments(slot["arguments"])}}
+            for _, slot in sorted(calls.items())
+        ]
+    yield {"type": "message", "message": assembled}
+
+
+def _parse_arguments(raw: str) -> dict[str, Any]:
+    """A model can emit malformed JSON; the tool then sees no arguments."""
+    try:
+        value = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def chat_once(model: str, messages: list[dict[str, Any]], *, timeout: float = 300.0) -> str:
     parts: list[str] = []
     for chunk in chat_stream(model, messages, timeout=timeout):
@@ -273,7 +353,34 @@ def _to_openai(message: dict[str, Any]) -> dict[str, Any]:
     JARVIS carries images the way Ollama wants them — a list of bare base64
     strings on the message. OpenAI wants a content array of parts with data
     URLs, so that conversion happens here rather than in the vision code.
+
+    Tool turns need two more translations: an assistant turn's arguments go
+    back as a JSON string, and a tool result must name the call it answers.
     """
+    role = message.get("role", "user")
+    if role == "tool":
+        return {
+            "role": "tool",
+            "tool_call_id": message.get("tool_call_id") or "",
+            "content": message.get("content") or "",
+        }
+    if role == "assistant" and message.get("tool_calls"):
+        return {
+            "role": "assistant",
+            "content": message.get("content") or None,
+            "tool_calls": [
+                {
+                    "id": call.get("id") or "",
+                    "type": "function",
+                    "function": {
+                        "name": (call.get("function") or {}).get("name") or "",
+                        "arguments": _arguments_text((call.get("function") or {}).get("arguments")),
+                    },
+                }
+                for call in message["tool_calls"]
+            ],
+        }
+
     images = message.get("images") or []
     text = message.get("content") or ""
     if not images:
@@ -286,3 +393,9 @@ def _to_openai(message: dict[str, Any]) -> dict[str, Any]:
             "image_url": {"url": f"data:image/jpeg;base64,{raw}"},
         })
     return {"role": message.get("role", "user"), "content": parts}
+
+
+def _arguments_text(arguments: Any) -> str:
+    if isinstance(arguments, str):
+        return arguments or "{}"
+    return json.dumps(arguments or {}, ensure_ascii=False)

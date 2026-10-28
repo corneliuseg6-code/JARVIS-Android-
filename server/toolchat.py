@@ -392,6 +392,7 @@ def run(
     *,
     model: str,
     conversation_id: str = "",
+    provider: str | None = None,
     timeout: float = 300.0,
 ) -> Iterator[dict[str, Any]]:
     """
@@ -399,6 +400,11 @@ def run(
 
     Events: ``tool_call``, ``tool_result``, ``tool_approval``, ``token``,
     ``answer``. The caller turns them into SSE frames.
+
+    `provider` pins one brain for every round of the turn. Under automatic
+    routing the choice can change between two calls to ``llm.provider()``,
+    and a conversation whose tool calls came from Claude cannot be finished
+    by Ollama — the ids and the message shapes would not match.
     """
     from . import llm  # imported here: llm imports this module for its catalogue
 
@@ -418,7 +424,7 @@ def run(
         reply: dict[str, Any] = {}
         streamed = False
         for event in llm.chat_stream_full(work, model=model, tools=definitions,
-                                          timeout=timeout):
+                                          which=provider, timeout=timeout):
             if event["type"] == "token":
                 streamed = True
                 yield {"type": "token", "text": event["text"]}
@@ -449,7 +455,8 @@ def run(
             if entry is None:
                 text = f"ERROR: there is no tool called {call['name']}."
                 yield {"type": "tool_result", "name": call["name"], "ran": False, "text": text}
-                work.append({"role": "tool", "content": text, "name": call["name"]})
+                work.append({"role": "tool", "content": text, "name": call["name"],
+                             "tool_call_id": call["id"]})
                 continue
 
             yield {
@@ -482,6 +489,9 @@ def run(
                 "role": "tool",
                 "content": outcome["text"][:8000],
                 "name": call["name"],
+                # OpenAI and Claude match a result to its call by id; Ollama
+                # issues none and ignores the field.
+                "tool_call_id": call["id"],
             })
 
     yield {

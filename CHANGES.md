@@ -2,6 +2,82 @@
 
 ---
 
+# V4 Phase 2a — tools on every brain, and routing
+
+Picked up from the V4 plan where the previous session stopped: Phase 1 was
+committed, Phase 2 had not been started.
+
+## OpenAI and Claude can now use the Armory's tools
+
+Before this, `llm.supports_tools()` was true for Ollama only, so with OpenAI
+or Claude selected a connected MCP server was silently ignored and the model
+answered without it.
+
+* `openai_client.chat_stream_full()` streams a turn and stitches tool calls
+  back together from OpenAI's fragments — id and name first, then the JSON
+  arguments a few characters at a time, keyed by index.
+* `anthropic_client.chat_stream_full()` does the same for Claude's
+  `tool_use` blocks and their `input_json_delta` fragments.
+* Both return the one message shape the tool loop already reads, so
+  `toolchat.py` changed in two places only: every tool result now carries the
+  `tool_call_id` of the call it answers, and the loop is pinned to one
+  provider for the whole turn.
+* History translation: OpenAI gets the arguments back as a JSON string and
+  `role: tool` messages; Claude gets `tool_use` blocks on the assistant turn
+  and `tool_result` blocks in a user turn, with consecutive results merged
+  into one turn and failed or refused tools flagged `is_error`.
+* **Settings → AI Connections → Let paid brains use the Armory's tools**
+  (`cloud_tools_enabled`, default on). Each tool round is a separate billed
+  request, so it can be switched off.
+
+## Routing: Manual / Local / Cloud / Automatic
+
+A new card at the top of AI Connections, `llm_mode` in the config.
+
+| Mode | Who answers |
+|---|---|
+| Manual (default) | The connection marked *In use* — exactly the previous behaviour |
+| Local | Always Ollama |
+| Cloud | The picked provider if it is paid, else the first authorised one; Ollama if none is |
+| Automatic | Ollama when it is running **and** has its model; otherwise an authorised paid provider; otherwise Ollama, so the error is Ollama's |
+
+"Authorised" means all three deliberate steps: enabled, cost notice
+acknowledged, key stored. A stored key alone is not enough, so no mode can
+start billing an account the user did not set up for it.
+
+The card shows the backend's verdict, not the setting: "Next answer: Claude.
+Ollama cannot answer, so this turn goes to the cloud and is billed." The
+chat stream's `start` event carries `mode` and `route_reason` too. The
+automatic decision is cached for 15 seconds, and each chat turn is routed
+once and pinned, so a tool round started on Claude is never finished by
+Ollama.
+
+## Fixed on the way
+
+* EYES flagged a frame as billed only on OpenAI; Claude bills too.
+* Clearing a key compared against the *routed* provider; it now compares
+  against the one picked in settings.
+* The Ollama card claimed JARVIS "never leaves it for a paid provider on its
+  own"; with Automatic routing that needs qualifying, and now is, in all six
+  languages.
+
+## Verified
+
+`tools/test_cloud_tools.py`, 41 checks, against local stand-ins for both APIs
+that stream in the documented shapes and record what JARVIS sent: fragmented
+arguments are reassembled, both full tool rounds run the tool for real and
+build the answer from its output, replayed history is in each API's shape,
+the switch withholds tools, and every routing rule holds — including Ollama
+up but missing its model counting as down. All seven suites pass (362
+checks); the Phase 1 benchmark still shows 60 token events with tools
+connected. In Chromium at 412×915 and 360×800 the routing card renders in
+the interface language, saves the mode, shows the live reason, and nothing
+scrolls sideways.
+
+Service worker cache bumped to `jarvis-v4-5-routing`.
+
+---
+
 # V4 Phase 1d — one continuous background behind the collapsed panel
 
 The requirement: when the conversation slides away, what it uncovers must be

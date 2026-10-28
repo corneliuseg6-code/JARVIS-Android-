@@ -82,11 +82,13 @@ until the current one passes.
 - Harness-overhead measurements before and after, against a token stub.
 
 ### Phase 2 — the AI brain
-- `Cloud / Local / Automatic` routing mode. Automatic prefers local, falls to
+- [x] `Cloud / Local / Automatic` routing mode (plus `Manual`, the default, so
+  nothing changes until it is chosen). Automatic prefers local, falls to
   cloud only when a cloud provider is both configured and authorised.
-- Tools for OpenAI and Claude, so `supports_tools()` stops being Ollama-only.
-- Gemini provider, same shape as the existing two, off until configured.
-- Per-provider cost limits where the API reports usage.
+- [x] Tools for OpenAI and Claude, so `supports_tools()` stops being
+  Ollama-only. Switchable, because each tool round is a billed request.
+- [ ] Gemini provider, same shape as the existing two, off until configured.
+- [ ] Per-provider cost limits where the API reports usage.
 
 ### Phase 3 — AI Control Center / Command Center (§2 + §10 are one screen)
 - A hierarchical dashboard: JARVIS as commander, providers and MCP servers

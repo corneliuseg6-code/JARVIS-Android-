@@ -67,6 +67,15 @@ DEFAULTS: dict[str, Any] = {
     # a paid remote API. Switching to a billed provider needs an explicit
     # acknowledgement, enforced in update_config() rather than only in the UI.
     "llm_provider": "ollama",            # "ollama" | "openai" | "claude"
+    # How the provider is chosen for each turn. "manual" answers with
+    # llm_provider exactly as picked, which is how every earlier version
+    # behaved. "local" is always Ollama, "cloud" is always an authorised
+    # paid provider, and "auto" prefers Ollama and reaches for the cloud only
+    # when Ollama cannot answer *and* a paid provider is authorised.
+    "llm_mode": "manual",                # manual | local | cloud | auto
+    # Whether OpenAI and Claude are handed the Armory's tools. Each tool
+    # round is a separate billed request, so this can be turned off.
+    "cloud_tools_enabled": True,
     "openai_enabled": False,             # the connection may be used at all
     "openai_model": "gpt-4o-mini",
     "openai_vision_model": "",           # empty = use the chat model
@@ -192,6 +201,8 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     # --- provider --------------------------------------------------------
     if cfg.get("llm_provider") not in ("ollama", "openai", "claude"):
         cfg["llm_provider"] = "ollama"
+    if cfg.get("llm_mode") not in ("manual", "local", "cloud", "auto"):
+        cfg["llm_mode"] = "manual"
     # A paid provider cannot be selected until it has been switched on AND its
     # cost notice acknowledged. Enforcing it here rather than only in the UI
     # means a hand-edited config.json, or a POST that skipped the interface,

@@ -236,22 +236,7 @@ def chat_stream(
     effort: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Stream an answer, yielding chunks in the Ollama shape."""
-    system, turns = _to_anthropic(messages)
-    payload: dict[str, Any] = {
-        "model": model,
-        "max_tokens": MAX_TOKENS,
-        "messages": turns,
-        "stream": True,
-    }
-    if system:
-        payload["system"] = system
-    chosen = (effort or config.get_config().get("claude_effort") or "").strip().lower()
-    if chosen in EFFORTS:
-        # How hard Claude thinks before answering. On a phone this is the
-        # difference between a reply and a wait, and it is billed, so it is
-        # the user's choice rather than a constant.
-        payload["output_config"] = {"effort": chosen}
-
+    payload = _payload(model, messages, effort=effort)
     response = _request("/v1/messages", payload, timeout=timeout, stream=True)
     with response:
         for raw in response:
@@ -287,6 +272,120 @@ def chat_stream(
     yield {"message": {"content": ""}, "done": True}
 
 
+def _payload(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    effort: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    system, turns = _to_anthropic(messages)
+    payload: dict[str, Any] = {
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "messages": turns,
+        "stream": True,
+    }
+    if system:
+        payload["system"] = system
+    chosen = (effort or config.get_config().get("claude_effort") or "").strip().lower()
+    if chosen in EFFORTS:
+        # How hard Claude thinks before answering. On a phone this is the
+        # difference between a reply and a wait, and it is billed, so it is
+        # the user's choice rather than a constant.
+        payload["output_config"] = {"effort": chosen}
+    if tools:
+        payload["tools"] = [_to_anthropic_tool(d) for d in tools]
+    return payload
+
+
+def _to_anthropic_tool(definition: dict[str, Any]) -> dict[str, Any]:
+    """The tool loop builds OpenAI-shaped definitions; Claude names them differently."""
+    fn = definition.get("function") or definition
+    schema = fn.get("parameters") or {}
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        schema = {"type": "object", "properties": {}}
+    return {
+        "name": fn.get("name") or "tool",
+        "description": fn.get("description") or "",
+        "input_schema": schema,
+    }
+
+
+def chat_stream_full(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    timeout: float = 300.0,
+) -> Iterator[dict[str, Any]]:
+    """
+    Stream a turn and assemble the whole message, tool calls included.
+
+    The same contract as ``ollama.chat_stream_full``. Claude announces a tool
+    call as a ``tool_use`` content block and then streams its input as
+    fragments of JSON, so the blocks are collected by index and parsed once
+    each is complete. The assembled message is returned in the OpenAI/Ollama
+    ``tool_calls`` shape the loop already reads.
+    """
+    payload = _payload(model, messages, tools=tools)
+    content: list[str] = []
+    blocks: dict[int, dict[str, Any]] = {}
+
+    response = _request("/v1/messages", payload, timeout=timeout, stream=True)
+    with response:
+        for raw in response:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            try:
+                event = json.loads(line[5:].strip())
+            except json.JSONDecodeError:
+                continue
+            kind = event.get("type")
+            index = int(event.get("index") or 0)
+
+            if kind == "content_block_start":
+                block = event.get("content_block") or {}
+                if block.get("type") == "tool_use":
+                    blocks[index] = {"id": block.get("id") or "",
+                                     "name": block.get("name") or "", "json": ""}
+            elif kind == "content_block_delta":
+                delta = event.get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    piece = delta.get("text") or ""
+                    if piece:
+                        content.append(piece)
+                        if not blocks:
+                            yield {"type": "token", "text": piece}
+                elif delta.get("type") == "input_json_delta" and index in blocks:
+                    blocks[index]["json"] += delta.get("partial_json") or ""
+            elif kind == "message_stop":
+                break
+            elif kind == "error":
+                error = event.get("error") or {}
+                raise AnthropicError(
+                    "stream_error",
+                    str(error.get("message") or "The stream failed.")[:300],
+                )
+
+    assembled: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
+    if blocks:
+        calls = []
+        for _, block in sorted(blocks.items()):
+            try:
+                arguments = json.loads(block["json"] or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+            calls.append({
+                "id": block["id"], "type": "function",
+                "function": {"name": block["name"],
+                             "arguments": arguments if isinstance(arguments, dict) else {}},
+            })
+        assembled["tool_calls"] = calls
+    yield {"type": "message", "message": assembled}
+
+
 def chat_once(model: str, messages: list[dict[str, Any]], *, timeout: float = 300.0) -> str:
     parts: list[str] = []
     for chunk in chat_stream(model, messages, timeout=timeout):
@@ -315,11 +414,39 @@ def _to_anthropic(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, A
             if text:
                 system_parts.append(text)
             continue
-        if role not in ("user", "assistant"):
-            role = "user"
 
         images = message.get("images") or []
-        if images:
+        if role == "tool":
+            # A tool result is a user turn holding a tool_result block. Two
+            # results in a row merge into one turn below, which is what the
+            # API requires after an assistant turn that made two calls.
+            role = "user"
+            content: Any = [{
+                "type": "tool_result",
+                "tool_use_id": message.get("tool_call_id") or "",
+                "content": text,
+                **({"is_error": True} if text.startswith(("ERROR", "REFUSED")) else {}),
+            }]
+        elif role == "assistant" and message.get("tool_calls"):
+            content = [{"type": "text", "text": text}] if text else []
+            for call in message["tool_calls"]:
+                fn = call.get("function") or {}
+                arguments = fn.get("arguments")
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments or "{}")
+                    except json.JSONDecodeError:
+                        arguments = {}
+                content.append({
+                    "type": "tool_use",
+                    "id": call.get("id") or "",
+                    "name": fn.get("name") or "",
+                    "input": arguments if isinstance(arguments, dict) else {},
+                })
+        elif role not in ("user", "assistant"):
+            role = "user"
+            content = text
+        elif images:
             blocks: list[dict[str, Any]] = []
             for raw in images:
                 blocks.append({
@@ -328,7 +455,7 @@ def _to_anthropic(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, A
                 })
             if text:
                 blocks.append({"type": "text", "text": text})
-            content: Any = blocks
+            content = blocks
         else:
             content = text
 

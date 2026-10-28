@@ -393,3 +393,14 @@ at once: the fixture can only live on loopback, which is what the guard
 exists to refuse. So the guard is tested unpatched against literal addresses,
 and the fetching and parsing are tested with loopback temporarily permitted.
 Both halves are covered; neither patch can hide the other.
+
+## Tools on OpenAI and Claude, and routing — verified, and not
+
+| Claim | Status |
+|---|---|
+| Tool calls streamed by OpenAI and Claude are reassembled and executed | **Verified against stand-ins** that stream the documented event shapes, fragmented the way the real APIs fragment them. |
+| The replayed tool round is in each API's own shape | **Verified** by reading back the exact request bodies. |
+| A live OpenAI or Claude completion with tools | **Not verified.** Neither API is reachable from the build machine, and no real key was used. The wire format follows the documentation; confirm it on the phone with one short question while an MCP server is connected. |
+| Routing never bills an unauthorised provider | **Verified**: with keys stored but no cost acknowledgement, Cloud and Automatic both stay on Ollama. |
+| Automatic notices Ollama going away | **Verified** against a stopped and a running stub, and a running one missing its model. A decision is reused for up to 15 seconds, so a turn sent the instant Ollama stops can still be routed to it and fail once. |
+

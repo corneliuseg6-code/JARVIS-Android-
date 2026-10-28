@@ -13,6 +13,8 @@ translate.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any, Iterator
 
 from . import anthropic_client, config, ollama, openai_client
@@ -46,10 +48,114 @@ class LLMError(RuntimeError):
         self.provider = provider
 
 
-def provider() -> str:
-    """The configured provider, falling back to the free local one."""
+MODES = ("manual", "local", "cloud", "auto")
+
+#: How long an automatic routing decision is reused. Deciding means asking
+#: Ollama whether it is up, and the status chip, the chat endpoint and the
+#: model resolution all ask in the same second.
+ROUTE_TTL = 15.0
+_ROUTE_LOCK = threading.Lock()
+_ROUTE_CACHE: dict[str, Any] = {"at": 0.0, "key": "", "value": None}
+
+
+def configured() -> str:
+    """The provider picked in settings, falling back to the free local one."""
     chosen = (config.get_config().get("llm_provider") or OLLAMA).lower()
     return chosen if chosen in PROVIDERS else OLLAMA
+
+
+def mode() -> str:
+    chosen = str(config.get_config().get("llm_mode") or "manual").lower()
+    return chosen if chosen in MODES else "manual"
+
+
+def authorised(which: str) -> bool:
+    """
+    May this provider be used without asking anyone anything?
+
+    Ollama always may. A paid one needs all three things the user does on
+    purpose: switch it on, acknowledge what it costs, and store a key.
+    Automatic routing never reaches past this — it cannot start billing an
+    account the user has not set up for exactly that.
+    """
+    if which == OLLAMA:
+        return True
+    cfg = config.get_config()
+    if which == OPENAI:
+        return bool(cfg.get("openai_enabled") and cfg.get("openai_cost_ack")
+                    and openai_client.has_key())
+    if which == CLAUDE:
+        return bool(cfg.get("claude_enabled") and cfg.get("claude_cost_ack")
+                    and anthropic_client.has_key())
+    return False
+
+
+def cloud_choice() -> str | None:
+    """The paid provider to use: the one picked in settings, else the first authorised."""
+    picked = configured()
+    order = [picked] if picked in BILLED else []
+    order += [p for p in (OPENAI, CLAUDE) if p not in order]
+    for which in order:
+        if authorised(which):
+            return which
+    return None
+
+
+def _local_ready() -> bool:
+    info = ollama.health(timeout=1.5)
+    if info.get("state") != "connected":
+        return False
+    model = active_model(OLLAMA)
+    wanted = model.split(":")[0]
+    return any(m == model or m.split(":")[0] == wanted for m in info.get("models", []))
+
+
+def route(*, force: bool = False) -> dict[str, str]:
+    """
+    Which provider answers the next turn, and why.
+
+    ``reason`` is a stable code the interface translates, so the status can
+    say "Ollama is down — answering with Claude" instead of leaving the user
+    to wonder why a reply was billed.
+    """
+    which_mode = mode()
+    if which_mode == "manual":
+        return {"provider": configured(), "mode": which_mode, "reason": "manual"}
+    if which_mode == "local":
+        return {"provider": OLLAMA, "mode": which_mode, "reason": "local"}
+    if which_mode == "cloud":
+        cloud = cloud_choice()
+        if cloud:
+            return {"provider": cloud, "mode": which_mode, "reason": "cloud"}
+        return {"provider": OLLAMA, "mode": which_mode, "reason": "no_cloud"}
+
+    # auto
+    cfg = config.get_config()
+    key = "\0".join(str(cfg.get(k)) for k in (
+        "llm_provider", "chat_model", "ollama_url", "openai_enabled",
+        "openai_cost_ack", "claude_enabled", "claude_cost_ack"))
+    key += "\0" + str(openai_client.has_key()) + str(anthropic_client.has_key())
+    now = time.monotonic()
+    with _ROUTE_LOCK:
+        cached = _ROUTE_CACHE
+        if (not force and cached["value"] is not None and cached["key"] == key
+                and now - cached["at"] < ROUTE_TTL):
+            return dict(cached["value"])
+
+    if _local_ready():
+        value = {"provider": OLLAMA, "mode": "auto", "reason": "local_ready"}
+    else:
+        cloud = cloud_choice()
+        value = ({"provider": cloud, "mode": "auto", "reason": "local_down"} if cloud
+                 else {"provider": OLLAMA, "mode": "auto", "reason": "local_down_no_cloud"})
+    with _ROUTE_LOCK:
+        _ROUTE_CACHE.update(at=time.monotonic(), key=key, value=dict(value))
+    return value
+
+
+def provider() -> str:
+    """The provider that answers the next turn, after routing."""
+    return route()["provider"]
 
 
 def active_model(which: str | None = None) -> str:
@@ -88,8 +194,18 @@ def health(timeout: float = 6.0, *, force: bool = False) -> dict[str, Any]:
     seconds to colour a chip nobody is looking at would be both slow and, on
     a metered account, rude. Background polls also reuse a briefly cached
     answer; `force` is for when the user is looking straight at the panel.
+
+    The routing mode and the reason for the choice ride along, so the
+    interface can say why this provider is the one answering.
     """
-    which = provider()
+    routed = route(force=force)
+    info = _health(routed["provider"], timeout=timeout, force=force)
+    info["mode"] = routed["mode"]
+    info["route_reason"] = routed["reason"]
+    return info
+
+
+def _health(which: str, *, timeout: float, force: bool) -> dict[str, Any]:
     model = active_model(which)
     if which == OPENAI:
         info = openai_client.health(timeout=timeout, force=force)
@@ -221,10 +337,11 @@ def chat_stream(
     messages: list[dict[str, Any]],
     *,
     model: str | None = None,
+    which: str | None = None,
     timeout: float = 300.0,
 ) -> Iterator[dict[str, Any]]:
     """Stream an answer from the active provider, in the Ollama chunk shape."""
-    which = provider()
+    which = which or provider()
     chosen = (model or "").strip() or active_model(which)
     try:
         if which == OPENAI:
@@ -248,27 +365,21 @@ def chat_once_full(
     *,
     model: str | None = None,
     tools: list[dict[str, Any]] | None = None,
+    which: str | None = None,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
     """
-    One non-streamed turn, returning the whole assistant message.
+    One turn, returning the whole assistant message with its `tool_calls`.
 
-    This is what the tool loop uses: it needs `tool_calls` intact, which a
-    streamed turn delivers in pieces. Only Ollama is wired for tools so far —
-    the paid providers fall back to a plain turn, so a tool-capable
-    conversation degrades to an ordinary one rather than failing.
+    Kept for callers that want the message and not the stream; it drains
+    ``chat_stream_full``, so every provider that streams tools has it too.
     """
-    which = provider()
-    chosen = (model or "").strip() or active_model(which)
-    try:
-        if which == OLLAMA:
-            options, keep_alive = ollama_runtime()
-            return ollama.chat_full(chosen, messages, options=options, tools=tools,
-                                    keep_alive=keep_alive, timeout=timeout)
-        text = chat_once(messages, model=chosen, timeout=timeout)
-        return {"role": "assistant", "content": text}
-    except ollama.OllamaError as exc:
-        raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
+    message: dict[str, Any] = {"role": "assistant", "content": ""}
+    for event in chat_stream_full(messages, model=model, tools=tools,
+                                  which=which, timeout=timeout):
+        if event["type"] == "message":
+            message = event["message"]
+    return message
 
 
 def chat_stream_full(
@@ -276,54 +387,65 @@ def chat_stream_full(
     *,
     model: str | None = None,
     tools: list[dict[str, Any]] | None = None,
+    which: str | None = None,
     timeout: float = 300.0,
 ) -> Iterator[dict[str, Any]]:
     """
     Stream a turn while still assembling the complete message.
 
-    This is what the tool loop uses now. Yields ``{"type": "token"}`` events
-    as text arrives and one final ``{"type": "message"}`` carrying the whole
-    turn with its `tool_calls`, so the loop loses nothing by streaming.
-
-    A provider that cannot be handed tools streams plain text and reports a
-    message with no tool calls, which the loop reads as "it answered".
+    This is what the tool loop uses. Yields ``{"type": "token"}`` events as
+    text arrives and one final ``{"type": "message"}`` carrying the whole
+    turn with its `tool_calls`, so the loop loses nothing by streaming. All
+    three providers implement it, each translating its own wire format into
+    the one shape the loop reads.
     """
-    which = provider()
+    which = which or provider()
     chosen = (model or "").strip() or active_model(which)
+    if which != OLLAMA and not supports_tools(which):
+        tools = None
     try:
-        if which == OLLAMA:
+        if which == OPENAI:
+            yield from openai_client.chat_stream_full(chosen, messages, tools=tools,
+                                                      timeout=timeout)
+        elif which == CLAUDE:
+            yield from anthropic_client.chat_stream_full(chosen, messages, tools=tools,
+                                                         timeout=timeout)
+        else:
             options, keep_alive = ollama_runtime()
             yield from ollama.chat_stream_full(
                 chosen, messages, options=options, tools=tools,
                 keep_alive=keep_alive, timeout=timeout)
-            return
-        parts: list[str] = []
-        for chunk in chat_stream(messages, model=chosen, timeout=timeout):
-            piece = chunk.get("message", {}).get("content", "")
-            if piece:
-                parts.append(piece)
-                yield {"type": "token", "text": piece}
-            if chunk.get("done"):
-                break
-        yield {"type": "message",
-               "message": {"role": "assistant", "content": "".join(parts)}}
+    except openai_client.OpenAIError as exc:
+        raise LLMError(exc.code, exc.detail, OPENAI) from exc
+    except anthropic_client.AnthropicError as exc:
+        raise LLMError(exc.code, exc.detail, CLAUDE) from exc
     except ollama.OllamaError as exc:
         raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
 
 
-def supports_tools() -> bool:
-    """Whether the active provider can be handed MCP tools."""
-    return provider() == OLLAMA
+def supports_tools(which: str | None = None) -> bool:
+    """
+    Whether this provider is handed MCP tools.
+
+    Ollama always is. The paid providers are too, unless the user turned
+    that off: every tool round is a second billed request, and on a long
+    research question there can be six of them.
+    """
+    which = which or provider()
+    if which == OLLAMA:
+        return True
+    return bool(config.get_config().get("cloud_tools_enabled", True))
 
 
 def chat_once(
     messages: list[dict[str, Any]],
     *,
     model: str | None = None,
+    which: str | None = None,
     timeout: float = 300.0,
 ) -> str:
     parts: list[str] = []
-    for chunk in chat_stream(messages, model=model, timeout=timeout):
+    for chunk in chat_stream(messages, model=model, which=which, timeout=timeout):
         parts.append(chunk.get("message", {}).get("content", ""))
         if chunk.get("done"):
             break

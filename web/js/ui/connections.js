@@ -62,6 +62,7 @@ export default class Connections {
     if (!this.host || !this.data) return;
     const cfg = state.get('config') || {};
     this.host.innerHTML = '';
+    this.host.appendChild(this._routingCard(cfg));
     for (const conn of this.data.connections) {
       this.host.appendChild(this._providerCard(conn, cfg));
     }
@@ -145,6 +146,51 @@ export default class Connections {
     } finally {
       this.busy = false;
     }
+  }
+
+  // ---------------------------------------------------------------- routing
+
+  /**
+   * How the brain is chosen for each turn.
+   *
+   * The line under the selector is the backend's own verdict — which provider
+   * the next turn goes to and the rule that picked it — not a restatement of
+   * the setting, so "Automatic" never hides that it is about to bill.
+   */
+  _routingCard(cfg) {
+    const data = this.data;
+    const mode = data.mode || cfg.llm_mode || 'manual';
+    const label = (p) => (data.connections.find((c) => c.provider === p) || {}).label || p;
+    const card = this._card(t('conn.routeTitle'), 'idle', t('conn.route_' + mode));
+
+    const select = document.createElement('select');
+    for (const value of ['manual', 'local', 'cloud', 'auto']) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = t('conn.route_' + value);
+      option.selected = value === mode;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', async () => {
+      if (await this._save({ llm_mode: select.value })) await this.refresh();
+    });
+    card.appendChild(this._row(t('conn.routeMode'), select));
+    card.appendChild(this._note(t('conn.routeHint_' + mode)));
+
+    const reason = data.route_reason || 'manual';
+    const billed = PAID.has(data.active);
+    card.appendChild(this._note(
+      t('conn.routeNow', { provider: label(data.active) }) + ' ' + t('conn.reason_' + reason),
+      // Amber whenever the next turn is billed or the mode could not be honoured.
+      billed || reason.startsWith('no_') || reason.endsWith('_no_cloud') ? 'warn' : '',
+    ));
+
+    card.appendChild(this._switch(
+      t('conn.cloudTools'), data.cloud_tools_enabled !== false, false,
+      async (checked) => { if (await this._save({ cloud_tools_enabled: checked })) await this.refresh(); },
+    ));
+    card.appendChild(this._note(t('conn.cloudToolsHint')));
+    return card;
   }
 
   // -------------------------------------------------------------- providers

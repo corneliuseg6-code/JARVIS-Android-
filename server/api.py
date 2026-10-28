@@ -155,8 +155,8 @@ def get_llm_connections(req: Request) -> Response:
     An inactive paid provider is not contacted until the user presses Test.
     """
     cfg = config.get_config()
-    active = llm.provider()
     live = llm.health(force=True)
+    active = live["provider"]
 
     def entry(which: str, **extra: Any) -> dict[str, Any]:
         return {
@@ -174,6 +174,13 @@ def get_llm_connections(req: Request) -> Response:
 
     return Response({
         "active": active,
+        # How `active` was chosen. In manual mode it is simply the pick; in
+        # the other modes the panel says which rule picked it.
+        "mode": live.get("mode", "manual"),
+        "route_reason": live.get("route_reason", "manual"),
+        "configured": llm.configured(),
+        "authorised": {p: llm.authorised(p) for p in llm.PROVIDERS},
+        "cloud_tools_enabled": llm.supports_tools(llm.OPENAI),
         "connections": [
             entry(
                 llm.OLLAMA,
@@ -288,7 +295,7 @@ def delete_llm_key(req: Request) -> Response:
     client.set_key("")
     # Without a key the paid provider cannot work, so fall back rather than
     # leaving every message failing.
-    if llm.provider() == which:
+    if llm.configured() == which:
         config.update_config({"llm_provider": llm.OLLAMA})
     return Response({"provider": which, "key_set": client.has_key(), "active": llm.provider()})
 
@@ -522,8 +529,12 @@ def post_chat(req: Request) -> Response:
         raise HttpError(400, "message required")
     lang = data.get("language") or cfg["conversation_language"]
     conv_id = data.get("conversation_id") or ""
+    # Routed once, here: every round of this turn goes to the same brain, even
+    # if automatic routing would choose differently a second from now.
+    routed = llm.route()
+    which = routed["provider"]
     # Whichever provider is active decides the default model.
-    model = (data.get("model") or "").strip() or llm.active_model()
+    model = (data.get("model") or "").strip() or llm.active_model(which)
 
     if conv_id:
         try:
@@ -551,7 +562,9 @@ def post_chat(req: Request) -> Response:
             "conversation_id": conv_id,
             "model": model,
             "language": lang,
-            "provider": llm.provider(),
+            "provider": which,
+            "mode": routed["mode"],
+            "route_reason": routed["reason"],
         })
         parts: list[str] = []
         started = time.time()
@@ -561,10 +574,11 @@ def post_chat(req: Request) -> Response:
         # stream: the model has to be handed the tools before it can ask for
         # one. Without tools, or on a provider that cannot use them, nothing
         # about the old path changes.
-        use_tools = llm.supports_tools() and toolchat.available()
+        use_tools = llm.supports_tools(which) and toolchat.available()
         try:
             if use_tools:
-                for event in toolchat.run(messages, model=model, conversation_id=conv_id):
+                for event in toolchat.run(messages, model=model, conversation_id=conv_id,
+                                          provider=which):
                     kind = event.pop("type")
                     if kind == "token":
                         piece = event.get("text", "")
@@ -588,7 +602,7 @@ def post_chat(req: Request) -> Response:
                         # tool ran and what it returned.
                         yield sse(kind, event)
             else:
-                for chunk in llm.chat_stream(messages, model=model):
+                for chunk in llm.chat_stream(messages, model=model, which=which):
                     piece = chunk.get("message", {}).get("content", "")
                     if piece:
                         parts.append(piece)
