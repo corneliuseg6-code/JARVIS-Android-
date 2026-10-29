@@ -58,7 +58,7 @@ git checkout claude/v4-agent-system && git pull
 
 **After any update, the installed PWA must be closed completely** (not just
 backgrounded) or it keeps serving the old cached shell. The service-worker
-cache name is bumped every release — currently `jarvis-v4-5-folders` in
+cache name is bumped every release — currently `jarvis-v4-6-layout` in
 `web/sw.js`. Bump it whenever `web/` changes.
 
 ---

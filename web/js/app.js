@@ -286,8 +286,9 @@ function applyAvatarMode(mode, { persist = false } = {}) {
   document.querySelectorAll('.mode-btn').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.mode === applied);
   });
-  const tag = document.getElementById('stage-tag');
-  if (tag) tag.textContent = applied.toUpperCase();
+  // The dial no longer carries a "RINGS"/"FACE" caption: the RINGS/FACE bar
+  // directly beneath it already says which one is showing, and the label was
+  // the only text sitting on the artwork.
   state.set({ avatarMode: applied });
   state.saveLocal({ avatarMode: applied });
   if (persist) {

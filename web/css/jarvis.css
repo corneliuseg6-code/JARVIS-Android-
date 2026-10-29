@@ -214,7 +214,11 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   position: relative;
   display: grid;
   grid-template-columns: var(--rail-l) minmax(0, 1fr) var(--rail-r);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* Four rows: the dial spans the first two, then the clock, then the
+     RINGS/FACE bar. The clock has a row of its own rather than floating over
+     the artwork, so it reads as a caption under the dial instead of sitting
+     on top of the ring ticks. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   column-gap: 6px;
   row-gap: 4px;
   flex: 0 0 auto;
@@ -340,12 +344,6 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   pointer-events: none;
 }
 
-.stage-tag {
-  position: absolute; left: 8px; top: 6px;
-  font-size: .56em; letter-spacing: .26em; text-transform: uppercase;
-  color: rgba(141, 243, 236, .55); pointer-events: none;
-}
-
 /* The only control left on screen in immersive mode; tapping anywhere else
    also leaves, but a visible way out matters on a phone. */
 .stage-exit {
@@ -380,7 +378,12 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
               rgba(2, 8, 14, .86) 42%,
               rgba(2, 8, 14, .55) 72%,
               rgba(2, 8, 14, 0) 100%);
-  backdrop-filter: blur(3px);
+  /* No backdrop-filter here. A mask does not reliably clip one: on a real
+     Android GPU the blurred layer is composited to the element's whole box,
+     which puts a hard-edged dark rectangle exactly where the rings are. The
+     radial gradient dims the dial on its own, and the round corner means the
+     element has no rectangle to show even if something else paints it. */
+  border-radius: 50%;
   -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 62%, transparent 100%);
   mask-image: radial-gradient(circle at 50% 50%, #000 62%, transparent 100%);
   z-index: 5;
@@ -399,7 +402,7 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 /* --- RINGS / FACE: under the dial, exactly as wide --- */
 .mode-row {
-  grid-column: 2; grid-row: 3;
+  grid-column: 2; grid-row: 4;
   justify-self: center;
   width: var(--dial);
   position: relative; z-index: 2;
@@ -937,8 +940,8 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
    Column 2, top of the band: the dial's own axis, in space the band already
    had. Nothing below it moves. */
 .hud-clock {
-  grid-column: 2; grid-row: 1;
-  justify-self: center; align-self: start;
+  grid-column: 2; grid-row: 3;
+  justify-self: center; align-self: center;
   position: relative; z-index: 3;
   display: flex; flex-direction: column; align-items: center; gap: 0;
   pointer-events: none; text-align: center;
@@ -1269,17 +1272,13 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-immersive="on"] .rail,
 .app[data-immersive="on"] .avatar-card,
 .app[data-immersive="on"] .mode-row,
+.app[data-immersive="on"] .hud-clock,
 .app[data-immersive="on"] .focus-block,
 .app[data-immersive="on"] .chat-panel {
   opacity: 0;
   transform: translateY(6px);
   pointer-events: none;
 }
-.app[data-immersive="on"] .stage-tag {
-  left: 14px;
-  top: calc(var(--safe-t) + 10px);
-}
-
 /* ===================== toasts ===================== */
 .toasts {
   position: fixed; left: 50%; bottom: calc(var(--safe-b) + 84px); transform: translateX(-50%);
@@ -1380,9 +1379,12 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .folders-panel[hidden] { display: none; }
 .folder-canvas {
   display: block; width: 100%;
-  /* Tall enough to read the sphere layout, never so tall the file list is
-     pushed off a phone screen. */
-  flex: 0 0 auto; height: clamp(150px, 34vh, 260px);
+  /* Shrinkable. With `flex: 0 0 auto` and a fixed height this was taller than
+     the panel on a short screen — it overflowed and pushed the file list
+     clean out of view, which is why the network looked shoved to the bottom
+     and cut off. It now takes the room that is going and gives the list its
+     share back. */
+  flex: 3 1 110px; min-height: 96px; max-height: 260px; height: auto;
   touch-action: manipulation;   /* a tap is a tap, with no 300ms wait */
 }
 .folder-empty { font-size: .64em; color: var(--text-dim); text-align: center; }
@@ -1398,7 +1400,9 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   white-space: nowrap;
 }
 .folder-files {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  /* Its own share of the panel, so the network can never squeeze it to
+     nothing. */
+  flex: 2 1 72px; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 1px;
   scrollbar-width: thin; -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;

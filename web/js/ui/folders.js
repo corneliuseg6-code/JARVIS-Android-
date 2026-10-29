@@ -16,8 +16,17 @@ import { api } from '../core/api.js';
 import { t } from '../i18n/index.js';
 import { toast } from './toast.js';
 
-/** Radius of the sphere the network sits on, as a fraction of the canvas. */
-const SHELL = 0.33;
+/**
+ * The shell the network sits on, as a fraction of the canvas.
+ *
+ * Two radii rather than one. A single `min(w, h)` radius means a wide, short
+ * panel — which is what a phone gives once the file list has taken its share
+ * — draws a small network with most of the width empty beside it. Spreading
+ * horizontally and vertically by their own fractions fills whatever shape
+ * the panel happens to be.
+ */
+const SHELL_X = 0.30;
+const SHELL_Y = 0.34;
 const ROTATE = 0.055;          // radians a second, slow enough to read labels
 const SPRING = 0.14;           // how fast a sphere settles into a new size
 
@@ -247,12 +256,13 @@ export default class Folders {
     const spin = this.spin;
     const x = node.x * Math.cos(spin) - node.z * Math.sin(spin);
     const z = node.x * Math.sin(spin) + node.z * Math.cos(spin);
-    const shell = Math.min(this.w, this.h) * SHELL;
+    const shellX = this.w * SHELL_X;
+    const shellY = this.h * SHELL_Y;
     // A mild perspective: far spheres shrink, near ones come forward.
     const perspective = 1 / (1 + z * 0.16);
     return {
-      sx: this.w / 2 + x * shell * perspective,
-      sy: this.h / 2 + node.y * shell * perspective,
+      sx: this.w / 2 + x * shellX * perspective,
+      sy: this.h / 2 + node.y * shellY * perspective,
       depth: perspective,
       z,
     };
@@ -330,7 +340,8 @@ export default class Folders {
     const order = [...this.nodes].sort((p, q) => points.get(q.id).z - points.get(p.id).z);
     for (const node of order) {
       const p = points.get(node.id);
-      const r = node.base * node.scale * p.depth * (this.w / 400);
+      const r = node.base * node.scale * p.depth
+        * (Math.min(this.w, this.h * 1.9) / 400);
       const pulse = node.id === this.active
         ? 1 + Math.sin(time * 2.6) * 0.06
         : 1;

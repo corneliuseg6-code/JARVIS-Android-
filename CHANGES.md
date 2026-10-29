@@ -2,6 +2,80 @@
 
 ---
 
+# V4 Phase 1f — four layout fixes from the phone
+
+Reported from a real Galaxy screenshot. Two were reproduced exactly here; one
+could not be, and is handled by removing its most likely cause outright.
+
+## The folder network was pushed down and cut off — reproduced
+
+`.folder-canvas` had `flex: 0 0 auto` and a fixed `height: clamp(150px, 34vh,
+260px)`. `0 0` means it cannot shrink, so on a short screen the canvas was
+**taller than the panel holding it**: 253 px of canvas inside a 214 px panel.
+Everything below it — the folder title, the refresh button, the whole file
+list — was pushed past the panel's bottom edge and out of view, which is
+exactly what the screenshot shows.
+
+The canvas now takes a share of the panel (`flex: 3 1 110px`, floor 96 px,
+ceiling 260 px) and the file list keeps a share of its own (`flex: 2 1 72px`),
+so neither can starve the other.
+
+The network also drew small, because its shell radius came from
+`min(w, h)` — on a wide, short panel most of the width sat empty beside it.
+It now spreads by `0.30 × width` and `0.34 × height` independently and fills
+whatever shape the panel happens to be. Measured at the phone's viewport, the
+spheres went from using 103 px of 382 px across to 289 px.
+
+## The "RINGS" caption is gone
+
+`.stage-tag` is removed from the markup, the stylesheet and `app.js`. The
+RINGS/FACE bar directly beneath the dial already says which visualiser is
+running, and this was the only text sitting on the artwork.
+
+## The clock moved below the rings
+
+The console grid gained a fourth row. The dial still spans the first two, the
+clock has row three to itself, and the RINGS/FACE bar takes row four. The
+clock is a caption under the dial now rather than floating over the ring
+ticks — no overlap in either direction. Still amber, still ticking seconds,
+same position horizontally.
+
+## The black box behind the rings — not reproduced, cause removed
+
+Measured at the phone's exact viewport (412×745) and pixel ratio (2.75), with
+power **active** as the screenshot shows: nothing inside `#stage` computes a
+background, and the particle field draws 4 129 lit pixels inside the dial. The
+box does not appear here.
+
+What was removed is its most likely cause. `.standby-veil` carried
+`backdrop-filter: blur(3px)`, and **a mask does not reliably clip a
+backdrop-filter**: on a real Android GPU the blurred layer composites to the
+element's whole border box, which puts a hard-edged dark rectangle exactly
+where the rings are. The blur is gone — the radial gradient dims the dial on
+its own — and the element now carries `border-radius: 50%`, so it has no
+rectangle to show even if something else paints it.
+
+The test now fails on *any* element inside the stage that has either a
+background above 5 % alpha **or** a backdrop-filter, in both power states.
+
+**If the box is still there after updating**, it is a stale cached build: the
+service worker serves the old stylesheet until every tab and the installed
+PWA are closed completely. The cache name is now `jarvis-v4-6-layout`.
+
+## Verified
+
+At 412×745, pixel ratio 2.75, touch emulated: the label gone; the clock below
+the dial (dial ends 367, clock starts 387) and above the bar; amber and
+ticking; nothing painting or blurring over the rings in **both** active and
+standby, with particles showing through in both; the canvas inside its panel;
+8 real entries listed under the network; the network wholly inside the canvas
+and centred within 22/15 px vertically. Dial still 275 px, bar still matching,
+four shortcuts, input bar fixed at the bottom, no page scroll.
+
+All six Python suites (327 checks) and all five browser suites still pass.
+
+---
+
 # V4 Phase 1e — the workspace and the holographic folder network
 
 The folder network needed somewhere real to point at, so the workspace came
