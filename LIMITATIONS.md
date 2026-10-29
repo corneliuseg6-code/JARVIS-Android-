@@ -5,6 +5,61 @@ the result was observed.
 
 ---
 
+## V4 Phase 2 — the multi-AI brain, Claude Code, OpenArt
+
+### Verified here
+
+| What | How |
+|---|---|
+| OpenAI, Claude and Gemini streaming, tool calls and usage | Against `tools/mock_cloud.py`, which emits each API's documented stream format. The test checks exactly what JARVIS sent back: tool-result shapes, call ids, Claude's thinking signature, Gemini's thoughtSignature. |
+| `anthropic-version: 2026-10-21` and no `temperature` | Sent and checked. |
+| Gemini endpoint and error shape | **Live**: `generativelanguage.googleapis.com` is reachable from this container, and an invalid key returns `400 API_KEY_INVALID`, which JARVIS maps to `auth`. |
+| Routing modes, fallback before output, budgets as a hard stop | `test_brain.py`, plus the chat endpoint driven in-process. |
+| Keys and OAuth tokens never in a response | Checked across config, connections, status and the OpenArt status. |
+| MCP OAuth sign-in | Full flow against a mock authorization server: discovery from the 401, registration, PKCE S256 checked by the server, resource indicator, callback with state check, refresh on expiry. Also done **in a real browser tab** through the PWA. |
+| Credit approval | A tool that claims `readOnlyHint` on a billed connection is still held. Nothing reaches the server before approval. The approval needs `confirm_spend` and is used once. The image is saved and shown. |
+| Claude Code with the **real CLI** (2.1.312) | Every generated flag is accepted by the CLI; a non-existent model made the API refuse the call, at $0. Three real runs on Haiku, about $0.17 in total: (1) a plan run that found a bug and changed nothing; (2) an edit run that fixed it, gave the exact diff, and was reverted; (3) a run stopped by a $0.05 cap. Run (3) is why the stop reasons are now said in words. |
+| Interface | Playwright at 412×915 on a mobile UA, 33 checks, 3 consecutive passes. Home-screen geometry is identical to `f33b6eb`. No JS errors. All six languages are free of raw keys and do not overflow. |
+
+### Not verified — and why
+
+- **No real OpenAI, Anthropic or Gemini completion.** No API keys were
+  available in the build session, and `api.openai.com` is blocked by its
+  proxy. The parsers follow the documented formats and the mock reproduces
+  them, but a live account may show differences: model names, a gateway's
+  handling of `stream_options`, Gemini's safety stops. The Test button
+  checks a key for free.
+- **OpenArt was never contacted.** `openart.ai` and `mcp.openart.ai` are
+  blocked from the build container, so neither its tool names nor its OAuth
+  server could be inspected. The integration uses the MCP spec's standard
+  flow, which is how OpenArt documents connecting clients (a URL plus
+  sign-in, no key), so it adapts to whatever tools the server lists. Four
+  things depend on OpenArt and are untested:
+  - whether OpenArt allows dynamic client registration with a
+    `127.0.0.1` redirect;
+  - whether your plan includes MCP access;
+  - what each call costs;
+  - whether results arrive inline (saved and shown) or as links (shown as
+    links, not downloaded).
+  If dynamic registration is refused, the card shows
+  "does not allow automatic client registration".
+- **Claude Code on Termux.** It is not an Anthropic-supported platform. It
+  was tested here on Linux x86_64 only; on the phone it needs a Linux
+  userland (proot-distro). See SETUP-V4-BRAIN.md.
+- **Price table.** The OpenAI and Gemini list prices are as known when
+  written; Claude's come from Anthropic's current model table. Prices
+  change, so all of them are editable, and the costs card links each
+  pricing page. Spend figures are estimates, never a bill.
+- **Automatic routing is a heuristic.** Simple, visible rules based on
+  length, code markers and research words, not a classifier. Every answer
+  says which rule decided it.
+- **Media from OpenArt as a URL is not downloaded.** Only inline media is
+  saved to the workspace.
+- **No real touchscreen or phone.** The sign-in tab and the PWA's return to
+  `127.0.0.1` were exercised in desktop Chromium with a mobile viewport.
+
+---
+
 ## Verified working
 
 ### Backend (Python 3.13, Linux x86_64)

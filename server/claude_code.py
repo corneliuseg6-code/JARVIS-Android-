@@ -43,6 +43,7 @@ import platform
 import signal
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -246,8 +247,11 @@ def clear_cache() -> None:
 
 def _help_text(binary: str) -> str:
     try:
+        # Run from the temp directory: a wrapper that mistakes --help for a
+        # task must not be able to write into JARVIS's own folder.
         done = subprocess.run([binary, "--help"], capture_output=True, text=True,
-                              timeout=15, check=False)
+                              timeout=15, check=False, cwd=tempfile.gettempdir(),
+                              stdin=subprocess.DEVNULL)
         return (done.stdout or "") + (done.stderr or "")
     except (OSError, subprocess.TimeoutExpired):
         return ""

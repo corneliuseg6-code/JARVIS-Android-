@@ -86,16 +86,38 @@ export const api = {
   // request the user has seen in full.
   codeStatus: () => request('/api/code/status', { timeout: 15000 }),
   codeRequests: () => request('/api/code/requests'),
-  codePropose: (prompt, directory, mode) =>
-    request('/api/code/request', { method: 'POST', body: { prompt, directory, mode } }),
+  codePropose: (prompt, directory, mode, resume = '') =>
+    request('/api/code/request', { method: 'POST', body: { prompt, directory, mode, resume } }),
   codeApprove: (id, allowEdits = false) =>
     request('/api/code/approve', { method: 'POST', body: { id, allow_edits: allowEdits } }),
   codeCancel: (id) => request('/api/code/cancel', { method: 'POST', body: { id } }),
+  codeStop: (id) => request('/api/code/stop', { method: 'POST', body: { id } }),
+  codeRevert: (id) =>
+    request('/api/code/revert', { method: 'POST', body: { id, confirm: true }, timeout: 30000 }),
+
+  // Routing and costs. None of these contacts a paid provider.
+  llmRoute: (message) => request('/api/llm/route', { method: 'POST', body: { message } }),
+  usage: () => request('/api/usage'),
+
+  // OpenArt, through its hosted MCP server. The sign-in tokens stay on the
+  // backend; the browser only ever learns "signed in" or not.
+  openartStatus: () => request('/api/openart/status'),
+  openartSetup: () => request('/api/openart/setup', { method: 'POST', body: {} }),
+  oauthStart: (id) =>
+    request('/api/armory/' + encodeURIComponent(id) + '/oauth/start', { method: 'POST', body: {}, timeout: 40000 }),
+  oauthSignOut: (id) =>
+    request('/api/armory/' + encodeURIComponent(id) + '/oauth/signout', { method: 'POST', body: {} }),
 
   // MCP tools in chat.
   chatTools: () => request('/api/chat/tools', { timeout: 15000 }),
   chatToolApprove: (id, approve = true) =>
     request('/api/chat/tools/approve', { method: 'POST', body: { id, approve } }),
+  // Approve and run a held call now. `confirmSpend` is required when the
+  // call spends credits (OpenArt): the card has asked the user first.
+  chatToolRun: (id, confirmSpend = false) =>
+    request('/api/chat/tools/run', {
+      method: 'POST', body: { id, confirm_spend: confirmSpend }, timeout: 300000,
+    }),
 
   // --- the workspace: real folders, real files -----------------------
   workspace: (depth = 2) => request('/api/workspace?depth=' + depth),
@@ -222,4 +244,9 @@ function dispatch(frame, handlers) {
   else if (event === 'tool_approval') handlers.onToolApproval?.(data);
   // Which workspace folder this turn is about, so its sphere can light up.
   else if (event === 'workspace') handlers.onWorkspace?.(data);
+  // Who is answering and why, including a fallback mid-turn; what it cost;
+  // and a coding task queued for approval.
+  else if (event === 'route') handlers.onRoute?.(data);
+  else if (event === 'cost') handlers.onCost?.(data);
+  else if (event === 'code_request') handlers.onCodeRequest?.(data);
 }

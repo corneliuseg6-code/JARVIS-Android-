@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import sys
 import time
@@ -492,7 +493,9 @@ def post_code_revert(req: Request) -> Response:
 # OpenArt — image and video generation through its official MCP server
 # --------------------------------------------------------------------------
 
-OPENART_URL = "https://mcp.openart.ai/mcp"
+#: OpenArt's official hosted MCP endpoint. Overridable only through the
+#: environment, for the offline tests; the interface never changes it.
+OPENART_URL = os.environ.get("JARVIS_OPENART_MCP_URL", "https://mcp.openart.ai/mcp")
 OPENART_PRESET = "openart"
 
 

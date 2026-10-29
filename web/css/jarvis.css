@@ -1423,3 +1423,34 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-chat="collapsed"] .folders-panel { opacity: 0; pointer-events: none; }
 .folders-panel { transition: opacity .18s ease; }
 @media (prefers-reduced-motion: reduce) { .folders-panel { transition: none; } }
+
+/* --------------------------------------------------------------------------
+   V4 — routing, costs, OpenArt, Claude Code agent, and their chat cards.
+   Only new classes; nothing above is overridden, so the console band, dial
+   and chat layout are untouched.
+   -------------------------------------------------------------------------- */
+.conn-link { font-size: .62em; color: var(--teal); text-decoration: underline; word-break: break-all; }
+.route-usable li.is-ok { color: #a9ffe0; }
+.cost-recent summary, .code-changes summary {
+  font-size: .62em; color: var(--text-dim); cursor: pointer; margin: 4px 0;
+}
+.code-steps { margin: 2px 0; padding-left: 18px; }
+.code-steps li { font-size: .60em; line-height: 1.45; color: var(--text-dim); word-break: break-word; }
+.code-changes { display: flex; flex-direction: column; gap: 5px; }
+.code-diff { max-height: 32dvh; white-space: pre; overflow: auto; }
+
+.msg-route {
+  align-self: center; max-width: 92%;
+  font-size: .60em; line-height: 1.4; color: var(--text-dim);
+  text-align: center; letter-spacing: .02em; opacity: .85;
+}
+.msg-route.is-fallback { color: var(--warn); opacity: 1; }
+
+.tool-approve.is-billed p { color: #ffd98a; }
+.tool-failed { margin: 0; font-size: .92em; color: #ffc8cd; }
+.tool-media {
+  display: block; max-width: 100%; max-height: 42dvh; margin-top: 6px;
+  border-radius: 8px; border: 1px solid var(--line);
+}
+.tool-media-path { font-size: .80em; color: var(--text-dim); margin-top: 3px; word-break: break-all; }
+.code-request-card .btn { margin-top: 6px; }

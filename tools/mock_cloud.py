@@ -72,6 +72,22 @@ def _echo_arg(text: str) -> str | None:
     return found.group(1) if found else None
 
 
+def _pick(text: str, names: list[str]) -> tuple[str, dict] | None:
+    """Which tool the scripted model calls, and with what: echo / draw / code."""
+    def named(suffix: str) -> str | None:
+        return next((n for n in names if n.endswith(suffix)), None)
+
+    if _echo_arg(text) and named("echo"):
+        return named("echo"), {"text": _echo_arg(text)}
+    drawn = re.search(r"draw\s+(.+)", text or "", re.IGNORECASE)
+    if drawn and named("generate_image"):
+        return named("generate_image"), {"prompt": drawn.group(1).strip()}
+    coded = re.search(r"code:\s*(.+)", text or "", re.IGNORECASE)
+    if coded and named("claude_code"):
+        return named("claude_code"), {"task": coded.group(1).strip(), "mode": "edit"}
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -200,9 +216,9 @@ class Handler(BaseHTTPRequestHandler):
             for word in f"The tool said: {last.get('content')}".split(" "):
                 events.append("data: " + json.dumps({"choices": [{"delta": {"content": word + " "}}]}) + "\n\n")
             events.append("data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}]}) + "\n\n")
-        elif body.get("tools") and _echo_arg(_last_user(messages)):
-            name = body["tools"][0]["function"]["name"]
-            args = json.dumps({"text": _echo_arg(_last_user(messages))})
+        elif body.get("tools") and _pick(_last_user(messages), [t["function"]["name"] for t in body["tools"]]):
+            name, picked = _pick(_last_user(messages), [t["function"]["name"] for t in body["tools"]])
+            args = json.dumps(picked)
             events.append("data: " + json.dumps({"choices": [{"delta": {"tool_calls": [
                 {"index": 0, "id": "call_abc", "type": "function",
                  "function": {"name": name, "arguments": args[:6]}}]}}]}) + "\n\n")
@@ -249,9 +265,9 @@ class Handler(BaseHTTPRequestHandler):
                 e({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": word + " "}})
             e({"type": "content_block_stop", "index": 1})
             stop = "end_turn"
-        elif body.get("tools") and _echo_arg(_last_user(turns)):
-            name = body["tools"][0]["name"]
-            args = json.dumps({"text": _echo_arg(_last_user(turns))})
+        elif body.get("tools") and _pick(_last_user(turns), [t["name"] for t in body["tools"]]):
+            name, picked = _pick(_last_user(turns), [t["name"] for t in body["tools"]])
+            args = json.dumps(picked)
             e({"type": "content_block_start", "index": 1,
                "content_block": {"type": "tool_use", "id": "toolu_1", "name": name, "input": {}}})
             e({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": args[:5]}})
@@ -286,10 +302,12 @@ class Handler(BaseHTTPRequestHandler):
             chunks.append({"candidates": [{"content": {"role": "model", "parts": [
                 {"text": f"The tool said: {response['response'].get('result')}"}]},
                 "finishReason": "STOP"}], "usageMetadata": usage})
-        elif body.get("tools") and _echo_arg(_last_user(contents)):
-            name = body["tools"][0]["functionDeclarations"][0]["name"]
+        elif body.get("tools") and _pick(_last_user(contents),
+                                         [d["name"] for d in body["tools"][0]["functionDeclarations"]]):
+            name, picked = _pick(_last_user(contents),
+                                 [d["name"] for d in body["tools"][0]["functionDeclarations"]])
             chunks.append({"candidates": [{"content": {"role": "model", "parts": [
-                {"functionCall": {"name": name, "args": {"text": _echo_arg(_last_user(contents))}},
+                {"functionCall": {"name": name, "args": picked},
                  "thoughtSignature": "GEMSIG"}]}, "finishReason": "STOP"}], "usageMetadata": usage})
         else:
             chunks.append({"candidates": [{"content": {"role": "model", "parts": [{"text": "Hello "}]}}]})
@@ -310,10 +328,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "registry.ollama.ai/library/tiny does not support tools"})
         if last.get("role") == "tool":
             lines.append({"message": {"role": "assistant", "content": f"The tool said: {last.get('content')}"}, "done": False})
-        elif body.get("tools") and _echo_arg(_last_user(messages)):
-            name = body["tools"][0]["function"]["name"]
+        elif body.get("tools") and _pick(_last_user(messages), [t["function"]["name"] for t in body["tools"]]):
+            name, picked = _pick(_last_user(messages), [t["function"]["name"] for t in body["tools"]])
             lines.append({"message": {"role": "assistant", "content": "", "tool_calls": [
-                {"function": {"name": name, "arguments": {"text": _echo_arg(_last_user(messages))}}}]}, "done": False})
+                {"function": {"name": name, "arguments": picked}}]}, "done": False})
         else:
             lines.append({"message": {"role": "assistant", "content": "Hello from Ollama"}, "done": False})
         lines.append({"message": {"role": "assistant", "content": ""}, "done": True})

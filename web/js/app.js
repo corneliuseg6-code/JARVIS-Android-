@@ -506,6 +506,9 @@ function onExit() {
 }
 
 // ---------------------------------------------------------------- errors
+// A card in the chat (a queued Claude Code task) can ask for a panel.
+window.addEventListener('jarvis:open-view', (event) => setView(event.detail));
+
 window.addEventListener('error', (event) => {
   console.error('[jarvis] uncaught', event.error || event.message);
   api.log('error', String(event.message || event.error));

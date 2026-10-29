@@ -471,6 +471,8 @@ try:
         stub.write_text(
             "#!/bin/sh\n"
             'if [ "$1" = "--version" ]; then echo "9.9.9 (stub)"; exit 0; fi\n'
+            'if [ "$1" = "--help" ]; then echo "Usage: claude --print --restricted '
+            '--permission-prompts --max-budget-usd"; exit 0; fi\n'
             'if [ "$1" = "auth" ]; then echo \'{"loggedIn": true, "authMethod": "api_key"}\'; exit 0; fi\n'
             'echo \'{"type":"system","subtype":"init","session_id":"abc-123","model":"stub"}\'\n'
             'echo \'{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"app.py"}}]}}\'\n'

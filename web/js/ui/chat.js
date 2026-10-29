@@ -4,6 +4,8 @@ import * as state from '../core/state.js';
 import { t, tLLMError } from '../i18n/index.js';
 import { toast } from './toast.js';
 
+const PROVIDER_NAMES = { ollama: 'Ollama', openai: 'OpenAI', claude: 'Claude', gemini: 'Gemini' };
+
 export default class Chat {
   constructor({ voice, onActivity, onSend, onReply } = {}) {
     this.voice = voice;
@@ -431,6 +433,7 @@ export default class Chat {
     // around a tool card that arrived after it.
     let segment = this._newSegment();
     let answer = '';
+    let turnCost = 0;
 
     const appendText = (chunk) => {
       if (!segment) segment = this._newSegment();
@@ -473,6 +476,20 @@ export default class Chat {
           closeSegment();
           this._toolApproval(data);
         },
+        onRoute: (data) => {
+          // Who answers and why, above the answer; a fallback gets its own
+          // line, so a switch of brain mid-turn is never silent.
+          closeSegment();
+          this._routeLine(data);
+          segment = this._newSegment();     // the answer streams in below it
+        },
+        onCost: (data) => {
+          turnCost += Number(data.usd || 0);
+        },
+        onCodeRequest: (data) => {
+          closeSegment();
+          this._codeRequestCard(data.request || {});
+        },
         onWorkspace: (data) => {
           // Move the highlight to the folder this turn is about. Silent,
           // because the user did not ask to change folders — JARVIS did.
@@ -493,7 +510,7 @@ export default class Chat {
           this.onReply?.(finalText);
           if (finalText && last) {
             this._addReplay(last.bubble, finalText, language);
-            this._addTiming(last.bubble, data);
+            this._addTiming(last.bubble, { ...data, usd: data.usd ?? turnCost });
           }
           this.voice?.speak(finalText, language);
         },
@@ -535,13 +552,92 @@ export default class Chat {
     const line = document.createElement('div');
     line.className = 'msg-timing';
     const first = data.ms_first_token;
-    line.textContent = first == null
+    let text = first == null
       ? t('chat.timingTotal', { total: (data.ms_total / 1000).toFixed(1) })
       : t('chat.timing', {
         first: (first / 1000).toFixed(1),
         total: (data.ms_total / 1000).toFixed(1),
       });
+    // Who answered, and on a paid brain what the turn cost (an estimate from
+    // the provider's own token counts).
+    if (data.provider) {
+      const name = PROVIDER_NAMES[data.provider] || data.provider;
+      text += ' · ' + name + (data.model ? ' ' + data.model : '');
+      if (data.usd) text += ' · ' + t('chat.cost', { usd: Number(data.usd).toFixed(4) });
+    }
+    line.textContent = text;
     bubble.appendChild(line);
+  }
+
+  /** "Claude — chosen in AI Connections", or a fallback, above the answer. */
+  _routeLine(data) {
+    if (!this.messages || !data.provider) return;
+    const line = document.createElement('div');
+    line.className = 'msg-route' + (data.fallback ? ' is-fallback' : '');
+    const name = PROVIDER_NAMES[data.provider] || data.provider;
+    line.textContent = data.fallback
+      ? t('chat.routeFallback', { name, reason: data.reason || '' })
+      : t('chat.route', { name, reason: data.reason || '' });
+    this.messages.appendChild(line);
+    this._follow(false);
+  }
+
+  /** A coding task JARVIS queued: it has not run, and this says where to approve it. */
+  _codeRequestCard(request) {
+    if (!this.messages) return;
+    const card = document.createElement('div');
+    card.className = 'tool-card is-pending code-request-card';
+    const head = document.createElement('div');
+    head.className = 'tool-head';
+    const ico = document.createElement('span');
+    ico.className = 'tool-ico';
+    ico.setAttribute('aria-hidden', 'true');
+    ico.textContent = '⌘';
+    const name = document.createElement('span');
+    name.className = 'tool-name';
+    name.textContent = 'Claude Code';
+    const st = document.createElement('span');
+    st.className = 'tool-state';
+    st.textContent = t('chat.codeQueued', { mode: request.mode === 'edit' ? t('conn.codeEdit') : t('conn.codePlan') });
+    head.append(ico, name, st);
+    const prompt = document.createElement('div');
+    prompt.className = 'tool-args';
+    prompt.textContent = (request.prompt || '').slice(0, 300);
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'btn btn-primary btn-sm';
+    open.dataset.act = 'review-code';
+    open.textContent = t('chat.codeReview');
+    open.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('jarvis:open-view', { detail: 'connections' }));
+    });
+    card.append(head, prompt, open);
+    this.messages.appendChild(card);
+    this._follow(true);
+  }
+
+  /** Images and video a tool returned, saved in the workspace and shown here. */
+  _mediaInto(target, media) {
+    for (const item of media || []) {
+      if (!item.url) continue;
+      let el;
+      if (item.kind === 'image') {
+        el = document.createElement('img');
+        el.alt = item.path;
+        el.loading = 'lazy';
+      } else if (item.kind === 'video' || item.kind === 'audio') {
+        el = document.createElement(item.kind);
+        el.controls = true;
+        el.preload = 'metadata';
+      } else continue;
+      el.className = 'tool-media';
+      el.src = item.url;
+      target.appendChild(el);
+      const where = document.createElement('div');
+      where.className = 'tool-media-path';
+      where.textContent = t('chat.savedTo', { path: item.path });
+      target.appendChild(where);
+    }
   }
 
   /**
@@ -607,17 +703,26 @@ export default class Chat {
     out.className = 'tool-out' + (data.ran ? '' : ' is-bad');
     out.textContent = (data.text || '').slice(0, 2000);
     card.appendChild(out);
+    this._mediaInto(card, data.media);
     this._follow(false);
   }
 
-  /** A mutating call: nothing has happened yet, and the user decides. */
+  /**
+   * A held call: nothing has happened yet, and the user decides.
+   *
+   * "Approve and run" runs exactly this call, once, and shows what came
+   * back. A call that spends credits (OpenArt) says so and asks again before
+   * spending — the backend refuses it without that confirmation too.
+   */
   _toolApproval(data) {
     const card = [...this.messages.querySelectorAll('.tool-card')].pop();
     const box = document.createElement('div');
-    box.className = 'tool-approve';
+    box.className = 'tool-approve' + (data.billed ? ' is-billed' : '');
 
     const note = document.createElement('p');
-    note.textContent = t('tool.approveNote', { tool: data.tool });
+    note.textContent = data.billed
+      ? t('tool.spendNote', { tool: data.tool, name: data.connection || '' })
+      : t('tool.approveRunNote', { tool: data.tool });
     box.appendChild(note);
 
     const row = document.createElement('div');
@@ -626,19 +731,30 @@ export default class Chat {
     yes.type = 'button';
     yes.className = 'btn btn-primary btn-sm';
     yes.dataset.act = 'approve';
-    yes.textContent = t('tool.approve');
+    yes.textContent = data.billed ? t('tool.spendRun') : t('tool.approveRun');
     yes.addEventListener('click', async () => {
+      if (data.billed && !window.confirm(t('tool.spendConfirm', { tool: data.tool, name: data.connection || '' }))) {
+        return;
+      }
       yes.disabled = true;
+      no.disabled = true;
+      const status = document.createElement('p');
+      status.className = 'tool-approved';
+      status.textContent = t('tool.runningNow');
+      row.replaceWith(status);
       try {
-        await api.chatToolApprove(data.pending.id, true);
-        box.replaceChildren();
-        const ok = document.createElement('p');
-        ok.className = 'tool-approved';
-        ok.textContent = t('tool.approved');
-        box.appendChild(ok);
+        const result = await api.chatToolRun(data.pending.id, !!data.billed);
+        status.textContent = result.ran ? t('tool.ran', { ms: result.ms ?? 0 }) : t('tool.didNotRun');
+        status.className = result.ran ? 'tool-approved' : 'tool-failed';
+        const out = document.createElement('pre');
+        out.className = 'tool-out' + (result.ran ? '' : ' is-bad');
+        out.textContent = (result.text || '').slice(0, 2000);
+        box.appendChild(out);
+        this._mediaInto(box, result.media);
+        this._follow(true);
       } catch (err) {
-        yes.disabled = false;
-        toast(err?.message || t('error.network'), 'error');
+        status.textContent = err?.message || t('error.network');
+        status.className = 'tool-failed';
       }
     });
     const no = document.createElement('button');

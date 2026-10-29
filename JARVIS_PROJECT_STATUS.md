@@ -1,7 +1,7 @@
 # JARVIS Android — project status
 
 Written for the next Claude Code session. Read this instead of the whole
-conversation. Last updated 2026-10-28.
+conversation. Last updated 2026-10-29.
 
 ---
 
@@ -10,8 +10,8 @@ conversation. Last updated 2026-10-28.
 | | |
 |---|---|
 | Repository | `corneliuseg6-code/JARVIS-Android-` |
-| **Development branch** | **`claude/v4-agent-system`** — all V4 work goes here |
-| Version | V4, Phase 1 complete (speed, voices, UI, workspace + folder network) |
+| **Development branch** | **`ccr-0204aa78-wihp2o`** — V4 Phase 2, cut from `claude/v4-agent-system` at `f33b6eb` |
+| Version | V4, Phase 2 complete: four brains with tools, routing, cost limits, Claude Code agent, OpenArt |
 | `main` | `c7c1fde` — **do not touch** |
 | `jarvis-v3-backup` | `766c3dd` — the frozen, working V3. **Never modify or delete.** |
 
@@ -58,7 +58,7 @@ git checkout claude/v4-agent-system && git pull
 
 **After any update, the installed PWA must be closed completely** (not just
 backgrounded) or it keeps serving the old cached shell. The service-worker
-cache name is bumped every release — currently `jarvis-v4-6-layout` in
+cache name is bumped every release — currently `jarvis-v4-8-brain` in
 `web/sw.js`. Bump it whenever `web/` changes.
 
 ---
@@ -131,7 +131,8 @@ python3 tools/test_voices.py        # 53
 python3 tools/test_toolcall.py      # 29
 python3 tools/test_websearch.py     # 88
 python3 tools/test_connections.py   # 44
-python3 tools/test_provider.py      # 35   → 327 checks, all passing
+python3 tools/test_provider.py      # 35
+python3 tools/test_brain.py         # 104  → 431 checks, all passing (V4 Phase 2)
 python3 tools/bench_chat.py         # latency against a fixed-rate stub
 ```
 
@@ -190,17 +191,22 @@ Browser suites are Playwright scripts in the scratchpad, not in the repo —
 
 ### V4 work still to do
 
-1. **Phase 2 — the AI brain.** `Cloud / Local / Automatic` routing mode;
-   **tools for OpenAI and Claude** (`llm.supports_tools()` is Ollama-only
-   today, which blocks all orchestration); Gemini as a fourth provider;
-   per-provider cost limits.
+1. ~~Phase 2 — the AI brain~~ **done** on `ccr-0204aa78-wihp2o`: Gemini;
+   tools for every provider; Manual/Local/Cloud/Automatic routing with
+   fallback; usage ledger and spending limits; Claude Code agent (progress,
+   diff, revert, resume, chat proposal tool); OpenArt over MCP with OAuth and
+   credit approval. Setup: SETUP-V4-BRAIN.md. What is and is not verified:
+   LIMITATIONS.md, "V4 Phase 2".
 2. **Phase 3 — AI Control / Command Center.** Hierarchical dashboard with
    JARVIS as commander, per-agent ON/OFF, autonomy setting, live "who is
-   doing what", honest labelling of model vs agent vs tool.
-3. **Phase 4 — long-term memory.** SQLite at `~/.jarvis/memory.db`:
-   decisions, preferences, open tasks, what JARVIS was doing when the app
-   closed. The workspace half of Phase 4 is **done**.
+   doing what", honest labelling of model vs agent vs tool. (The routing
+   card and the per-answer signature are the first pieces of it.)
+3. **Phase 4 — long-term memory.** SQLite at `~/.jarvis/memory.db`.
 4. **Phase 5** — multi-source comparison in research; integration tests.
+
+Live checks still owed (nothing here could reach them): a real OpenAI,
+Anthropic and Gemini completion with a key, and OpenArt's real MCP server.
+`tools/mock_cloud.py` is the stand-in for all of them.
 
 The full plan, with the reasoning behind each phase, is in `V4-PLAN.md`.
 Per-release detail is in `CHANGES.md`; everything that could not be tested is

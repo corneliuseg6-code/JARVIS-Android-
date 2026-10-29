@@ -2,6 +2,162 @@
 
 ---
 
+# V4 Phase 2 — the multi-AI brain, the Claude Code agent, OpenArt
+
+Branch `ccr-0204aa78-wihp2o`, cut from `claude/v4-agent-system` at `f33b6eb`.
+`main` is untouched. Setup: **SETUP-V4-BRAIN.md**.
+
+## Four brains, all with tools
+
+- **Gemini** joins Ollama, OpenAI and Claude (`server/gemini_client.py`):
+  Gemini API with an AI Studio key sent in the `x-goog-api-key` header,
+  streaming over SSE, function calling. A Gemini app subscription is not
+  API access, and the interface says so.
+- **MCP tools on every brain.** Before this, only Ollama was handed tools,
+  so an OpenAI or Claude turn silently ran without them. Each client now
+  streams tool calls and sends results back in its provider's own format:
+  - OpenAI: `tool_call_id`, with arguments as a JSON string.
+  - Claude: a `tool_result` block in a user turn. Thinking blocks are
+    replayed with their signatures unchanged.
+  - Gemini: `functionResponse`. The `functionCall` part is replayed with its
+    `thoughtSignature`, and MCP JSON schemas are cleaned of keywords Gemini
+    rejects.
+- A local model that cannot use tools answers the same turn without them,
+  instead of failing.
+
+## Routing
+
+`llm.route()` turns the routing mode into an ordered list of candidates,
+each with its reason:
+
+- **Manual**: the brain picked in AI Connections (the old behaviour; the
+  default).
+- **Local**: Ollama only.
+- **Cloud**: paid brains in your preference order.
+- **Automatic**: short turns stay local; coding, long, research and image
+  turns go to the cloud (Claude first for code). If Ollama is offline, cloud
+  is used.
+
+A brain is a candidate only when it is switched on, its notice is
+acknowledged, a key is stored, and it is under budget. Skipped brains are
+listed with the reason.
+
+With fallback on, a brain that fails before producing any output is replaced
+by the next candidate, and the chat shows a `route` event saying who failed
+and why. Every answer is signed with the brain, the model and the turn's
+estimated cost.
+
+## Cost controls
+
+`server/usage.py` records every paid turn from the provider's own usage
+report:
+
+- OpenAI's `include_usage` chunk;
+- Claude's `message_start` and `message_delta` (cache reads and writes
+  counted as input);
+- Gemini's `usageMetadata` (thinking tokens counted as output).
+
+Each turn is priced with list prices that you can override per model. An
+unknown model is priced at the worst known rate for its provider.
+
+There are daily (default $2) and monthly (default $20) limits for all
+providers, plus optional per-provider daily limits. They are checked
+**before** every paid call, including each round of the tool loop. A paid
+answer is capped at `max_output_tokens`.
+
+## Claude Code: develop, edit, repair, with approval
+
+- `--output-format stream-json`, so the panel shows each step live, with a
+  **Stop** button.
+- Sign-in state comes from `claude auth status`; JARVIS never touches the
+  credentials.
+- `--max-budget-usd` (default $1 per run) and `--permission-prompts none`:
+  in a headless run, anything that would ask for permission is refused.
+- Edit runs stay `--restricted` (no shell) unless you grant specific
+  commands such as `Bash(npm test)`.
+- Flags are passed only if the installed CLI lists them in `--help`, so an
+  older community build is not broken by a flag it lacks.
+- After an edit run: the files it changed and the diff. Files that were
+  already dirty before the run are reported separately and never claimed.
+- **Revert** (git projects only, confirmed) restores exactly the run's own
+  edits and deletes the files it created.
+- **Continue this session…** resumes the same session (`--resume`) and needs
+  a new approval.
+- New chat tool `jarvis__claude_code`: JARVIS can *queue* a coding task from
+  the conversation. It never runs one; the card links to the approval queue.
+- A plan run is restricted (no shell) and uses `--permission-mode plan`.
+
+## OpenArt: images and video, with credit approval
+
+- Through OpenArt's official hosted MCP server, `https://mcp.openart.ai/mcp`.
+- Sign-in follows the MCP authorization spec (`server/oauth.py`):
+  - protected-resource metadata, found from the 401's `resource_metadata`;
+  - authorization-server metadata;
+  - dynamic client registration as a public client with a loopback
+    redirect;
+  - authorization code with PKCE S256 and the RFC 8707 resource indicator;
+  - refresh on expiry, and once more on a 401.
+- Tokens live only in `secrets.json`.
+- A **billed** connection holds every call that is not plainly a read for
+  per-call approval. It does so even when the server labels the tool
+  read-only, and even with *Allow writes* on.
+- `/api/chat/tools/run` runs the approved call once from its card and needs
+  `confirm_spend` for a billed connection.
+- Returned images, video and audio are saved to
+  `workspace/Results/Media/` and served back type-checked by
+  `/api/workspace/media`. Only image, video and audio types are served, with
+  `nosniff`.
+
+## Interface
+
+AI Connections gains these cards:
+
+- **Routing**;
+- **Costs and limits**;
+- **Gemini**;
+- **OpenArt**;
+- a richer **Claude Code** card.
+
+Each paid card states that a chat subscription is not API access and links
+to the place to create a key.
+
+The chat now shows:
+
+- a route line;
+- a fallback line;
+- the answer's signature (brain, model, cost);
+- approve-and-run cards that show the returned image;
+- a queued-task card for Claude Code.
+
+There are 85 new strings in each of the six languages (432 keys each, all in
+sync). The home screen is unchanged and was measured against `f33b6eb`:
+
+- dial 275 × 275 at the same position;
+- RINGS/FACE row 275 px wide;
+- four shortcuts;
+- `scrollHeight` 915;
+- no JS errors.
+
+The service-worker cache is `jarvis-v4-8-brain`.
+
+## Tests
+
+- `tools/test_brain.py`, 104 checks, against `tools/mock_cloud.py`, a single
+  offline server speaking the OpenAI, Anthropic, Gemini, Ollama and
+  MCP-with-OAuth wire formats.
+- Two existing assertions were updated for intended changes: four providers,
+  and stream-json output.
+- All seven suites pass: 431 checks.
+- A Playwright flow (33 checks, 3 consecutive passes) covers the panel,
+  routing, a signed chat answer, OpenArt sign-in through a real browser tab,
+  credit approval with the image shown, and Claude Code queued from chat,
+  approved, diffed and reverted.
+- Three real Claude Code runs (CLI 2.1.312, Haiku) went through the bridge:
+  a plan run, an edit run with diff and revert, and a run stopped by the
+  spending cap.
+
+---
+
 # V4 Phase 1g — the black box behind the rings, actual cause
 
 Every earlier attempt changed CSS (the stage background, the standby veil),

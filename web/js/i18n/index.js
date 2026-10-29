@@ -81,6 +81,8 @@ export function t(key, vars) {
  */
 const LLM_CODES = [
   'no_key', 'auth', 'quota', 'rate_limit', 'model_missing', 'forbidden', 'server', 'timeout',
+  'budget_exceeded', 'no_provider', 'refusal', 'blocked', 'overloaded', 'invalid_request',
+  'stream_error',
 ];
 
 export function tLLMError(code, detail) {
