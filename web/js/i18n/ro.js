@@ -488,5 +488,7 @@ export default {
   "tools.st.error": "Eroare",
   "tools.st.unknown": "Necunoscut",
   "tools.st.ready": "Disponibil",
-  "tools.st.idle": "Neconectat"
+  "tools.st.idle": "Neconectat",
+  "error.llm.empty_answer": "Modelul nu a dat niciun r\u0103spuns. \u00cencearc\u0103 din nou sau un model mai mare",
+  "error.llm.stream_closed": "Conexiunea s-a \u00eenchis \u00eenainte s\u0103 soseasc\u0103 un r\u0103spuns"
 };

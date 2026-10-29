@@ -326,8 +326,27 @@ class Handler(BaseHTTPRequestHandler):
         lines = []
         if body.get("tools") and STATE.get("ollama_no_tools"):
             return self._json(400, {"error": "registry.ollama.ai/library/tiny does not support tools"})
-        if last.get("role") == "tool":
-            lines.append({"message": {"role": "assistant", "content": f"The tool said: {last.get('content')}"}, "done": False})
+        small = STATE.get("ollama_small") or set()
+        names = [t["function"]["name"] for t in body.get("tools") or []]
+        target = STATE.get("ollama_list_target", "list_directory")
+        wants_list = "list" in _last_user(messages).lower() and any(n.endswith(target) for n in names)
+        if "silent" in small:
+            pass       # returns no text at all, for anything
+        elif small and wants_list and (last.get("role") != "tool" or "loop" in small):
+            # A small local model asked to list files: it calls the listing
+            # tool — by its bare name if "bare", and again after every result
+            # if "loop", which is what a 1.5B model does when it is confused.
+            name = next(n for n in names if n.endswith(target))
+            if "bare" in small:
+                name = name.split("__", 1)[-1]
+            lines.append({"message": {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": name, "arguments": {"path": "."}}}]}, "done": False})
+        elif any(m.get("role") == "tool" for m in messages) and (
+                ("empty" in small and body.get("tools")) or "mute" in small):
+            pass       # says nothing after the result ("mute": not even when asked again)
+        elif last.get("role") == "tool" or (small and any(m.get("role") == "tool" for m in messages)):
+            result = next((m.get("content") for m in reversed(messages) if m.get("role") == "tool"), "")
+            lines.append({"message": {"role": "assistant", "content": f"The tool said: {result}"}, "done": False})
         elif body.get("tools") and _pick(_last_user(messages), [t["function"]["name"] for t in body["tools"]]):
             name, picked = _pick(_last_user(messages), [t["function"]["name"] for t in body["tools"]])
             lines.append({"message": {"role": "assistant", "content": "", "tool_calls": [
@@ -428,6 +447,11 @@ def start(port: int = 0) -> tuple[ThreadingHTTPServer, int]:
 
 
 if __name__ == "__main__":
+    import os
+    # Run by hand as a misbehaving small model, e.g.
+    #   MOCK_OLLAMA_SMALL=bare,loop MOCK_LIST_TARGET=workspace_list python3 tools/mock_cloud.py
+    STATE["ollama_small"] = {m for m in os.environ.get("MOCK_OLLAMA_SMALL", "").split(",") if m}
+    STATE["ollama_list_target"] = os.environ.get("MOCK_LIST_TARGET", "list_directory")
     srv, bound = start(int(sys.argv[1]) if len(sys.argv) > 1 else 8799)
     print(f"mock cloud on 127.0.0.1:{bound}", flush=True)
     try:

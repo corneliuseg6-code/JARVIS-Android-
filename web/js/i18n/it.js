@@ -488,5 +488,7 @@ export default {
   "tools.st.error": "Errore",
   "tools.st.unknown": "Sconosciuto",
   "tools.st.ready": "Pronto",
-  "tools.st.idle": "Non connesso"
+  "tools.st.idle": "Non connesso",
+  "error.llm.empty_answer": "Il modello non ha restituito alcuna risposta. Riprova, o usa un modello pi\u00f9 grande",
+  "error.llm.stream_closed": "La connessione si \u00e8 chiusa prima che arrivasse una risposta"
 };

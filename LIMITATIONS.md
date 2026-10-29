@@ -5,6 +5,24 @@ the result was observed.
 
 ---
 
+## V4 Phase 2d — MCP tool-call fixes
+
+- **Not run against a real `qwen2.5:1.5b`.** Ollama, its model registry and
+  Hugging Face are all blocked from the build container. Each failure mode
+  was instead reproduced with a mock Ollama that copies small-model
+  behaviour (bare tool names, repeated calls, empty replies, an error line),
+  through the real server, the real MCP servers and the real UI. Whether
+  qwen2.5:1.5b on the phone shows these exact behaviours is inferred from
+  the symptom, not observed.
+- `num_ctx` 4096 on tool turns: if an older Ollama on the phone was running
+  the model at 2048, the first tool turn reloads it once at 4096. That
+  costs one-off load time and more memory (about 120 MB for a 1.5B model).
+  Set a value in Settings to override it.
+- The deterministic fallback shows the tool's raw result. It is correct,
+  but not a conversational answer.
+
+---
+
 ## V4 Phase 2c — cone removed
 
 - **Verified:** in Chromium with real full screen, by measuring pixels on

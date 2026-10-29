@@ -2,6 +2,91 @@
 
 ---
 
+# V4 Phase 2d — MCP tool calls: no more silent turns
+
+Reported from the phone: with Ollama and both MCP servers connected, *"list
+the files in my workspace"* hangs, or goes back to standby without
+replying. Ollama runs `qwen2.5:1.5b` and emits `tool_calls`.
+
+## Root causes (reproduced before fixing)
+
+1. **A turn could end with no text and no error.** The tool loop allowed 6
+   rounds. A small model that calls the same tool again after each result
+   used all 6 (six slow generations on a phone: the "hang"), then the turn
+   ended with `done` and empty text. A model that said nothing after a
+   result did the same. The interface dropped the empty bubble and showed
+   "Standing by". Reproduced in the real UI on the previous commit: 6×
+   `list_directory`, no answer, no error.
+2. **Tool names without JARVIS's prefix failed.** Tools are exposed as
+   `449fb5b27a93__list_directory`; a 1.5B model calls `list_directory` and got
+   "no tool called list_directory".
+3. **"My workspace" had no tool.** The only listing tool was JARVIS Files,
+   rooted at `$HOME`, so even a correct call listed the home folder, not
+   `~/.jarvis/workspace`.
+4. **Context overflow on Ollama.** Tool results up to 8000 characters, plus
+   history and tool definitions, could outgrow Ollama's default context.
+   Ollama then silently drops the *start* of the prompt, including the
+   user's question.
+
+## Fixes
+
+- **Every turn ends in an answer or an explicit error** (`toolchat.run`):
+  - A repeated identical call is not re-run; its earlier result is handed
+    back and the loop moves on to the answer.
+  - When tools ran but the model gave no text, or the rounds ran out, the
+    model is asked once more to answer from the results. A local model gets
+    no tools this time, so it cannot loop again.
+  - If it is still silent, the user gets the tool's own result, introduced
+    in their language.
+  - A model that returns nothing at all now produces an `empty_answer`
+    error, never a silent `done`.
+- **Lenient tool names:** a bare or differently-cased tool name resolves
+  when exactly one connection has that tool. An ambiguous or unknown name
+  gets an error listing the real names.
+- **New built-in tool `jarvis__workspace_list`** (read-only). It lists
+  `~/.jarvis/workspace` or a folder inside it. It is offered whenever the
+  tool loop runs; chats with no tool source are unchanged.
+- **Tool guidance in the system message:** call a tool only when needed,
+  answer from the result, never repeat a call, and use
+  `jarvis__workspace_list` for the workspace.
+- **Ollama context:**
+  - a tool turn asks for `num_ctx` 4096 when Settings sets none (a value
+    set in Settings always wins);
+  - a local model is shown at most 2500 characters of one tool result (the
+    full text still reaches the interface).
+- **Ollama errors are visible:**
+  - an `{"error": …}` line mid-stream (e.g. "model runner has unexpectedly
+    stopped") and a read timeout now raise a clear `ollama_error` instead
+    of an empty reply or a bare socket error;
+  - a model Ollama refuses tools for is remembered for the session, so
+    later turns don't send a failing request first.
+- **Interface:** if the stream ever closes with neither an answer nor an
+  error, the chat says "The connection closed before an answer arrived"
+  instead of silently going back to standby. There are 2 new strings in
+  all six languages.
+
+## Verified
+
+- Real UI, Chromium at 412×915, real HTTP server, both MCP presets
+  connected, and a mock Ollama playing a misbehaving small model:
+
+  | Model behaviour | Before | After |
+  |---|---|---|
+  | Loops on `list_directory` | 6 runs, no answer | 1 run plus an answer |
+  | Bare name + loop on the workspace tool | — | 1 run plus the 7 sections listed |
+  | Silent after the result | silent | the tool's result is shown |
+  | Silent always | silent | a clear error |
+
+- `test_brain.py`: 127 checks, 15 new, covering each case above, the real
+  JARVIS Files MCP server, `num_ctx`, the 2500-character cap and the
+  Ollama error line.
+- All 7 suites pass (455 checks). `selftest` 71/71. Chat latency unchanged
+  (TTFT ≈ 0.35 s). Home geometry identical; the browser suites pass
+  (45 + 33).
+- Service-worker cache: `jarvis-v4-11-toolfix`.
+
+---
+
 # V4 Phase 2c — the cone under the rings, removed
 
 The large translucent "pyramid/cone" rising from under the rings toward the

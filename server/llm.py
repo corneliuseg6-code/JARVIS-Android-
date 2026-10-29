@@ -50,6 +50,9 @@ _MODEL_KEY = {OLLAMA: "chat_model", OPENAI: "openai_model", CLAUDE: "claude_mode
 
 ROUTING_MODES = ("manual", "local", "cloud", "auto")
 
+#: Context for an Ollama turn that carries tools, when Settings sets none.
+TOOL_NUM_CTX = 4096
+
 
 class LLMError(RuntimeError):
     """A provider failure, carrying a code the frontend knows how to say."""
@@ -361,6 +364,14 @@ def chat_stream_full(
     try:
         if which == OLLAMA:
             options, keep_alive = ollama_runtime()
+            if tools and "num_ctx" not in options:
+                # Tool definitions, the history and a tool result together
+                # outgrow the 2048-token default some Ollama builds still use,
+                # and Ollama then silently drops the start of the prompt — the
+                # user's question with it. 4096 is enough for a tool turn and is
+                # Ollama's own default in current builds, so the model is not
+                # reloaded. A value set in Settings always wins.
+                options = {**options, "num_ctx": TOOL_NUM_CTX}
             for event in ollama.chat_stream_full(
                     chosen, _for_ollama(messages), options=options, tools=tools,
                     keep_alive=keep_alive, timeout=timeout):

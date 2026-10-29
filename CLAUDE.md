@@ -163,3 +163,11 @@ Add a line whenever a correction is confirmed (by the user or by a test).
 - A phone screenshot may come from an older branch. Check what it shows
   (e.g. is the AI ☰ button present?) before assuming it is the current
   build.
+- A chat turn must never end silently. An empty `done` made the UI fall back
+  to standby. `toolchat.run` always ends in text or `empty`, and `post_chat`
+  turns empty into an `empty_answer` error.
+- Small local models drop tool-name prefixes and repeat calls. Resolve
+  names leniently and never re-run an identical call within a turn.
+- Ollama silently truncates the *start* of an over-long prompt. Cap tool
+  results for local models and give tool turns enough `num_ctx`.
+

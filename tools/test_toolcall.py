@@ -200,7 +200,9 @@ def main() -> int:
 
         section("The catalogue the model is handed")
         definitions, lookup = toolchat.catalogue()
-        check("tools reach the catalogue", len(definitions) == 5, f"{len(definitions)} tools")
+        mcp_tools = [n for n, e in lookup.items() if not e.get("builtin")]
+        check("all five MCP tools reach the catalogue", len(mcp_tools) == 5, f"{len(mcp_tools)} tools")
+        check("…plus JARVIS's own workspace tool", "jarvis__workspace_list" in lookup)
         listing = next((n for n, e in lookup.items() if e["tool"] == "list_directory"), "")
         check("list_directory is offered", bool(listing), listing)
         check("list_directory is read-only", lookup[listing]["writes"] is False)

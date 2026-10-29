@@ -59,7 +59,7 @@ git checkout claude/v4-agent-system && git pull
 
 **After any update, the installed PWA must be closed completely** (not just
 backgrounded) or it keeps serving the old cached shell. The service-worker
-cache name is bumped every release — currently `jarvis-v4-10-nofigure` in
+cache name is bumped every release — currently `jarvis-v4-11-toolfix` in
 `web/sw.js`. Bump it whenever `web/` changes.
 
 ---
@@ -136,7 +136,7 @@ python3 tools/test_toolcall.py      # 29
 python3 tools/test_websearch.py     # 88
 python3 tools/test_connections.py   # 44
 python3 tools/test_provider.py      # 35
-python3 tools/test_brain.py         # 112  → 439 checks, all passing (V4 Phase 2)
+python3 tools/test_brain.py         # 127  → 455 checks with test_toolcall at 30, all passing
 python3 tools/bench_chat.py         # latency against a fixed-rate stub
 ```
 
@@ -201,6 +201,9 @@ Browser suites are Playwright scripts in the scratchpad, not in the repo —
    diff, revert, resume, chat proposal tool); OpenArt over MCP with OAuth and
    credit approval. Setup: SETUP-V4-BRAIN.md. What is and is not verified:
    LIMITATIONS.md, "V4 Phase 2".
+   MCP tool turns always end in an answer or an explicit error (loop guard,
+   final answer round, fallback to the tool's result, lenient tool names,
+   built-in `jarvis__workspace_list`, `num_ctx` 4096 on Ollama tool turns).
    The full-screen backdrop no longer draws the hooded figure (the "cone"
    under the rings), removed at the user's request.
    The **AI TOOLS menu** (top-left "AI ☰") shows every tool's real

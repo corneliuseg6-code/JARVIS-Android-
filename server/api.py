@@ -26,6 +26,10 @@ from .app import HttpError, Request, Response, Router, sse
 router = Router()
 STARTED_AT = time.time()
 
+#: Local models Ollama has refused tools for, this run. Not persisted: an
+#: updated Ollama or model may support them after a restart.
+_NO_TOOL_MODELS: set[str] = set()
+
 # Runtime-only power state: standby must never survive a restart.
 _RUNTIME = {"power_state": "active"}
 
@@ -855,13 +859,13 @@ def post_chat(req: Request) -> Response:
                 chosen = requested_model
             answered_by = {**cand, "model": chosen}
             emitted = False
-            tools_this_turn = use_tools
+            tools_this_turn = use_tools and not (which == llm.OLLAMA and chosen in _NO_TOOL_MODELS)
             try:
                 while True:
                     try:
                         if tools_this_turn:
                             source = toolchat.run(messages, model=chosen, conversation_id=conv_id,
-                                                  which=which)
+                                                  which=which, language=lang)
                         else:
                             source = (
                                 {"type": "token", "text": e["text"]} if e["type"] == "token"
@@ -908,6 +912,9 @@ def post_chat(req: Request) -> Response:
                         if (tools_this_turn and not emitted and which == llm.OLLAMA
                                 and "support" in exc.detail.lower() and "tool" in exc.detail.lower()):
                             tools_this_turn = False
+                            # Remembered, so later turns do not pay for the
+                            # same refused request first.
+                            _NO_TOOL_MODELS.add(chosen)
                             yield sse("route", {"mode": decision["mode"], "provider": which,
                                                 "model": chosen, "reason": "this local model "
                                                 "cannot use tools; answering without them",
@@ -940,8 +947,15 @@ def post_chat(req: Request) -> Response:
                 return
 
         text = "".join(parts).strip()
-        if text:
-            conversations.append(conv_id, "assistant", text, language=lang)
+        if not text:
+            # Never end a turn in silence. An empty reply used to arrive as a
+            # `done` with no text: the interface dropped the empty bubble and
+            # went back to standby, which looked like JARVIS hanging up.
+            yield sse("error", {"code": "empty_answer", "provider": answered_by["provider"],
+                                "detail": f"{llm.LABELS.get(answered_by['provider'], '')} "
+                                          f"{answered_by['model']} returned no text."[:300]})
+            return
+        conversations.append(conv_id, "assistant", text, language=lang)
         # Which project was this about? Matched against folders that really
         # exist, so a name JARVIS invented lights nothing up.
         try:

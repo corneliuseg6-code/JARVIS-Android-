@@ -488,5 +488,7 @@ export default {
   "tools.st.error": "Erreur",
   "tools.st.unknown": "Inconnu",
   "tools.st.ready": "Pr\u00eat",
-  "tools.st.idle": "Non connect\u00e9"
+  "tools.st.idle": "Non connect\u00e9",
+  "error.llm.empty_answer": "Le mod\u00e8le n'a renvoy\u00e9 aucune r\u00e9ponse. R\u00e9essayez, ou un mod\u00e8le plus grand",
+  "error.llm.stream_closed": "La connexion s'est ferm\u00e9e avant l'arriv\u00e9e d'une r\u00e9ponse"
 };

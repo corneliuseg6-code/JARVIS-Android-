@@ -434,6 +434,9 @@ export default class Chat {
     let segment = this._newSegment();
     let answer = '';
     let turnCost = 0;
+    // Set by done or error. A stream that closes with neither must still say
+    // so: going quietly back to standby looked like JARVIS hanging up.
+    let settled = false;
 
     const appendText = (chunk) => {
       if (!segment) segment = this._newSegment();
@@ -496,12 +499,14 @@ export default class Chat {
           this.folders?.setActive(data.active || '', { silent: true });
         },
         onError: (data) => {
+          settled = true;
           if (!segment) segment = this._newSegment();
           segment.bubble.classList.add('msg-error');
           segment.body.textContent = tLLMError(data.code, data.detail);
           segment.text = ' ';     // keep the bubble: it carries the error
         },
         onDone: (data) => {
+          settled = true;
           const finalText = (data.text || answer).trim();
           // The text is already on screen, streamed. Only write it out again
           // if nothing arrived — a provider that answered in one piece.
@@ -515,6 +520,12 @@ export default class Chat {
           this.voice?.speak(finalText, language);
         },
         onClose: () => {
+          if (!settled && this.stream && !answer) {
+            if (!segment) segment = this._newSegment();
+            segment.bubble.classList.add('msg-error');
+            segment.body.textContent = tLLMError('stream_closed');
+            segment.text = ' ';
+          }
           closeSegment();
           this.stream = null;
           this._setBusy(false);

@@ -140,13 +140,53 @@ def _builtins() -> dict[str, dict[str, Any]]:
     """
     from . import claude_code  # local: claude_code is heavier and optional
 
-    out: dict[str, dict[str, Any]] = {}
+    # Always there: "my workspace" means JARVIS's own folder, which the Files
+    # server (rooted at the home directory) cannot name for the model. Without
+    # this a small model lists the home directory, or guesses a path and fails.
+    out: dict[str, dict[str, Any]] = {"jarvis__workspace_list": WORKSPACE_TOOL}
     try:
         if claude_code.ready_cached():
             out["jarvis__claude_code"] = claude_code.TOOL_SPEC
     except Exception:  # noqa: BLE001 - a broken optional tool must not break chat
         pass
     return out
+
+
+WORKSPACE_TOOL: dict[str, Any] = {
+    "description": (
+        "List the folders and files in the user's JARVIS workspace — what they "
+        "mean by 'my workspace' or 'my files'. Sections: Projects, Research, "
+        "Documents, Notes, Tasks, Results, Journal. Read-only."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string",
+                     "description": "Optional folder inside the workspace, e.g. 'Projects'. "
+                                    "Leave empty for the top level."},
+        },
+    },
+}
+
+
+def _workspace_list(arguments: dict[str, Any]) -> str:
+    from . import workspace
+
+    raw = str(arguments.get("path") or arguments.get("folder") or "").strip()
+    # Small models write "/", ".", "workspace" or "~/workspace" for the top.
+    if raw.strip("/. ").lower() in ("", "workspace", "~/workspace", "jarvis", "my workspace"):
+        raw = ""
+    data = workspace.listing(raw.strip("/"))
+    entries = data["entries"]
+    where = data["path"] if data["path"] not in ("", ".") else "the workspace"
+    if not entries:
+        return f"{where} is empty."
+    lines = [f"{len(entries)} entries in {where}:"]
+    for e in entries[:200]:
+        lines.append(f"- {e['name']}/" if e["kind"] == "folder" else f"- {e['name']} ({e['size']} bytes)")
+    if len(entries) > 200:
+        lines.append(f"… and {len(entries) - 200} more")
+    return "\n".join(lines)
 
 
 def is_mutating(tool_name: str, annotations: dict[str, Any] | None = None) -> bool:
@@ -362,6 +402,16 @@ def execute(entry: dict[str, Any], arguments: dict[str, Any], *, conversation_id
     conn_id = entry["connection_id"]
     tool = entry["tool"]
 
+    if entry.get("builtin") and tool == "jarvis__workspace_list":
+        from . import workspace
+
+        started = time.time()
+        try:
+            text = _workspace_list(arguments)
+        except workspace.WorkspaceError as exc:
+            return {"ran": False, "error": str(exc), "ms": 0, "text": f"ERROR: {exc}"}
+        return {"ran": True, "ms": int((time.time() - started) * 1000), "text": text}
+
     if entry.get("builtin"):
         from . import claude_code
 
@@ -444,7 +494,14 @@ def execute(entry: dict[str, Any], arguments: dict[str, Any], *, conversation_id
 # --------------------------------------------------------------------------
 
 def available() -> bool:
-    return bool(armory.all_tools()) or bool(_builtins())
+    """
+    Whether a turn goes through the tool loop at all.
+
+    Only when a real tool source is there: a connected MCP server, or a ready
+    Claude Code. The workspace tool rides along with those rather than
+    turning every plain chat into a tool turn on its own.
+    """
+    return bool(armory.all_tools()) or any(k != "jarvis__workspace_list" for k in _builtins())
 
 
 def run_approved(pending_id: str) -> dict[str, Any]:
@@ -493,6 +550,74 @@ def _parse_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
     return calls
 
 
+def resolve_name(name: str, lookup: dict[str, dict[str, Any]]) -> str | None:
+    """
+    The exposed name a model meant, or None.
+
+    Small local models routinely drop the connection prefix JARVIS adds
+    (`449fb5b27a93__list_directory` comes back as `list_directory`) or change
+    its case. Accept the real tool name when exactly one connection has it;
+    refuse when it is ambiguous rather than guess between two servers.
+    """
+    if name in lookup:
+        return name
+
+    def norm(text: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+    wanted = norm(name.split("__", 1)[-1])
+    matches = [key for key, entry in lookup.items()
+               if norm(key) == norm(name) or norm(entry["tool"].split("__", 1)[-1]) == wanted]
+    return matches[0] if len(matches) == 1 else None
+
+
+#: Said after the tools, when the model is asked for its answer. Plain and
+#: short, because it is mostly read by small local models.
+FINAL_NUDGE = ("Answer my question now, in plain words, using the tool results above. "
+               "Do not call any more tools.")
+
+#: Appended to the system message whenever tools are offered.
+TOOL_GUIDANCE = (
+    "\n\nYou can use tools. Call one only when you need it. After a tool result "
+    "arrives, answer the user from it; never call the same tool again with the same "
+    "arguments. For the user's workspace use jarvis__workspace_list."
+)
+
+#: The fallback sentence when a model returns nothing at all after a tool
+#: ran: the user still gets the result, in their own language.
+_FALLBACK = {
+    "ro": "Iată ce a returnat `{tool}`:",
+    "en": "Here is what `{tool}` returned:",
+    "fr": "Voici ce qu'a renvoyé `{tool}` :",
+    "de": "Das hat `{tool}` geliefert:",
+    "es": "Esto es lo que devolvió `{tool}`:",
+    "it": "Ecco cosa ha restituito `{tool}`:",
+}
+
+#: How much of one tool result a local model is shown. Ollama silently drops
+#: the *start* of a prompt that outgrows its context, which is where the
+#: user's question is — so a long result must not push it out.
+LOCAL_RESULT_CHARS = 2500
+
+
+def _with_tool_guidance(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for index, message in enumerate(messages):
+        if message.get("role") == "system":
+            patched = dict(message)
+            patched["content"] = str(message.get("content") or "") + TOOL_GUIDANCE
+            return [*messages[:index], patched, *messages[index + 1:]]
+    return [{"role": "system", "content": TOOL_GUIDANCE.strip()}, *messages]
+
+
+def _fallback_answer(results: list[dict[str, Any]], language: str) -> str:
+    """The last successful result, introduced in the user's language."""
+    for item in reversed(results):
+        if item["ran"] and item["text"].strip():
+            head = _FALLBACK.get(language, _FALLBACK["en"]).format(tool=item["tool"].split("__")[-1])
+            return f"{head}\n\n{item['text'].strip()[:3000]}"
+    return ""
+
+
 def run(
     messages: list[dict[str, Any]],
     *,
@@ -500,12 +625,20 @@ def run(
     conversation_id: str = "",
     timeout: float = 300.0,
     which: str | None = None,
+    language: str = "en",
 ) -> Iterator[dict[str, Any]]:
     """
     Drive the conversation with tools, yielding events for the SSE layer.
 
     Events: ``tool_call``, ``tool_result``, ``tool_approval``, ``token``,
     ``answer``. The caller turns them into SSE frames.
+
+    A turn always ends with an answer or an explicit ``empty`` flag — never
+    silently. A model that loops (calls the same tool with the same
+    arguments again) or runs out of rounds is asked once more, without
+    tools, to answer from what it has; if it still says nothing, the user
+    gets the tool's own result. Before this, either case ended the turn with
+    no text and no error, and the interface simply went back to standby.
     """
     from . import llm  # imported here: llm imports this module for its catalogue
 
@@ -513,10 +646,13 @@ def run(
     if not definitions:
         raise ToolChatError("no connected MCP server exposes any tools")
 
-    work = _with_guidance(list(messages), definitions)
+    local = (which or llm.provider()) == llm.OLLAMA
+    work = _with_tool_guidance(_with_guidance(list(messages), definitions))
     yield {"type": "tools", "count": len(definitions),
            "names": [d["function"]["name"] for d in definitions]}
 
+    results: list[dict[str, Any]] = []
+    seen: dict[str, str] = {}
     for round_no in range(1, MAX_ROUNDS + 1):
         # Streamed, so the answer appears as it is written. Tokens are passed
         # straight through; the assembled message at the end is what the loop
@@ -538,12 +674,16 @@ def run(
         content = (reply.get("content") or "").strip()
 
         if not calls:
-            # The model answered in words: that is the end of the loop. The
-            # text has already been sent token by token, so say so rather than
-            # repeating it — `streamed` tells the caller not to send it twice.
-            yield {"type": "answer", "text": content, "rounds": round_no - 1,
-                   "streamed": streamed}
-            return
+            if content or not results:
+                # The model answered in words: that is the end of the loop. The
+                # text has already been sent token by token, so say so rather
+                # than repeating it — `streamed` tells the caller not to send it
+                # twice. Empty with no tool run is reported as empty, not hidden.
+                yield {"type": "answer", "text": content, "rounds": round_no - 1,
+                       "streamed": streamed, **({} if content else {"empty": True})}
+                return
+            # Tools ran and the model said nothing: ask for the answer.
+            break
 
         # Keep the assistant's own turn in the transcript, or the tool
         # messages that follow have nothing to attach to.
@@ -556,13 +696,29 @@ def run(
             turn["_native"] = reply["_native"]
         work.append(turn)
 
+        repeated = False
         for call in calls:
-            entry = lookup.get(call["name"])
+            resolved = resolve_name(call["name"], lookup)
+            entry = lookup.get(resolved) if resolved else None
             if entry is None:
-                text = f"ERROR: there is no tool called {call['name']}."
+                names = ", ".join(sorted(lookup))
+                text = (f"ERROR: there is no tool called {call['name']}. "
+                        f"Available tools: {names}.")
                 yield {"type": "tool_result", "name": call["name"], "ran": False, "text": text}
                 work.append({"role": "tool", "content": text, "name": call["name"],
                              "tool_call_id": call["id"], "is_error": True})
+                continue
+
+            key = json.dumps([resolved, call["arguments"]], sort_keys=True, default=str)
+            if key in seen:
+                # The same call again: the result is already in the transcript.
+                # Running it again cannot help and is how a small model spins
+                # through every round and ends with nothing to say.
+                # The earlier result is handed back again — not re-run — because
+                # a small model attends to the newest message most.
+                repeated = True
+                work.append({"role": "tool", "content": seen[key],
+                             "name": call["name"], "tool_call_id": call["id"]})
                 continue
 
             yield {
@@ -598,17 +754,45 @@ def run(
                        "connection": entry.get("connection", "")}
             yield event
 
+            results.append({"tool": entry["tool"], "ran": outcome["ran"], "text": outcome["text"]})
+            shown = outcome["text"][:LOCAL_RESULT_CHARS if local else 8000]
+            seen[key] = shown
             work.append({
                 "role": "tool",
-                "content": outcome["text"][:8000],
+                "content": shown,
                 "name": call["name"],
                 "tool_call_id": call["id"],
                 "is_error": not outcome["ran"],
             })
 
-    yield {
-        "type": "answer",
-        "text": "",
-        "rounds": MAX_ROUNDS,
-        "truncated": True,
-    }
+        if repeated:
+            break
+
+    # ---- the answer, which every turn gets ---------------------------------
+    # Asked once more, with an explicit request to answer. A local model is
+    # given no tools this time, so it cannot loop again; a paid API keeps the
+    # definitions (its history holds tool calls) and any further call is
+    # ignored.
+    work.append({"role": "user", "content": FINAL_NUDGE})
+    text_parts: list[str] = []
+    for event in llm.chat_stream_full(work, model=model, tools=None if local else definitions,
+                                      timeout=timeout, which=which):
+        if event["type"] == "token":
+            text_parts.append(event["text"])
+            yield {"type": "token", "text": event["text"]}
+        elif event["type"] == "message":
+            if not text_parts and (event["message"].get("content") or "").strip() \
+                    and not event["message"].get("tool_calls"):
+                text_parts.append(event["message"]["content"])
+                yield {"type": "token", "text": event["message"]["content"]}
+            if event.get("cost"):
+                yield {"type": "cost", **event["cost"]}
+    final = "".join(text_parts).strip()
+    if final:
+        yield {"type": "answer", "text": final, "rounds": MAX_ROUNDS, "streamed": True}
+        return
+    fallback = _fallback_answer(results, language)
+    if fallback:
+        yield {"type": "answer", "text": fallback, "rounds": MAX_ROUNDS, "fallback": True}
+        return
+    yield {"type": "answer", "text": "", "rounds": MAX_ROUNDS, "empty": True}

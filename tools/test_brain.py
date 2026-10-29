@@ -356,6 +356,96 @@ try:
     config.update_config({"gemini_enabled": True})
 
     # ------------------------------------------------------------------
+    section("Small local models + MCP: every turn ends in an answer")
+    from server import workspace as ws
+    ws.ensure()
+    check("a model Ollama refused tools for is remembered (from the test above)",
+          "llama3.2:3b" in api._NO_TOOL_MODELS)
+    api._NO_TOOL_MODELS.clear()      # this section's model does support tools
+    files = armory.create_connection({
+        "name": "JARVIS Files", "transport": "stdio",
+        "command": f"{sys.executable} {ROOT / 'tools' / 'fs_mcp_server.py'} {HOME}",
+    })
+    check("the real JARVIS Files server connects", armory.connect(files["id"])["state"] == "connected")
+    config.update_config({"routing_mode": "manual", "llm_provider": "ollama", "ollama_num_ctx": 0})
+    mock_cloud.STATE["ollama_list_target"] = "workspace_list"
+
+    def turn(modes):
+        mock_cloud.STATE["ollama_small"] = modes
+        mock_cloud.STATE["requests"].clear()
+        frames = chat("JARVIS, list the files in my workspace.")
+        done = next((d for k, d in frames if k == "done"), None)
+        err = next((d for k, d in frames if k == "error"), None)
+        ran = [d for k, d in frames if k == "tool_result" and d.get("ran")]
+        return frames, done, err, ran
+
+    frames, done, err, ran = turn({"plain"})
+    check("the workspace tool really runs", len(ran) == 1 and "Projects/" in ran[0]["text"],
+          ran[0]["text"][:60] if ran else "nothing ran")
+    check("…and the final answer lists the workspace sections",
+          done is not None and all(x in done["text"] for x in ("Projects", "Research", "Journal")),
+          (done or {}).get("text", "")[:80])
+    sent = requests_for("ollama")[0][2]
+    check("a tool turn asks Ollama for a 4096-token context when none is set",
+          (sent.get("options") or {}).get("num_ctx") == 4096, sent.get("options"))
+
+    frames, done, err, ran = turn({"bare"})
+    check("a tool name without JARVIS's prefix still resolves and runs",
+          len(ran) == 1 and done is not None, [k for k, _ in frames])
+
+    frames, done, err, ran = turn({"loop"})
+    check("a model that repeats the same call: the tool runs once",
+          len(ran) == 1, f"{len(ran)} runs")
+    check("…and the turn still ends with the answer", done is not None and "Projects" in done["text"])
+    check("…well before the six-round limit", len(requests_for("ollama")) <= 3,
+          f"{len(requests_for('ollama'))} model calls")
+
+    frames, done, err, ran = turn({"empty"})
+    check("silent after the result: asked again without tools, and answers",
+          done is not None and "Projects" in done["text"]
+          and "tools" not in requests_for("ollama")[-1][2])
+
+    frames, done, err, ran = turn({"loop", "mute"})
+    check("silent even when asked: the user gets the tool's own result",
+          done is not None and done["text"].startswith("Here is what `workspace_list` returned"),
+          (done or {}).get("text", "")[:60])
+
+    mock_cloud.STATE["ollama_list_target"] = "list_directory"
+    mock_cloud.STATE["ollama_small"] = {"plain"}
+    frames = chat("JARVIS, list the files in my workspace.")
+    sent = [r[2] for r in requests_for("ollama")]
+    tool_msgs = [m for body in sent for m in body.get("messages", []) if m.get("role") == "tool"]
+    check("a local model is shown at most 2500 characters of one result",
+          tool_msgs and all(len(m["content"]) <= toolchat.LOCAL_RESULT_CHARS for m in tool_msgs))
+
+    mock_cloud.STATE["ollama_small"] = set()
+    mock_cloud.STATE["fail"]["ollama"] = (200, {"error": "model runner has unexpectedly stopped"})
+    frames = chat("hello there")
+    err = next((d for k, d in frames if k == "error"), None)
+    check("an Ollama error line becomes a visible error, not an empty reply",
+          err is not None and "unexpectedly stopped" in err.get("detail", ""), err)
+    mock_cloud.STATE["fail"].clear()
+
+    mock_cloud.STATE["ollama_small"] = {"silent"}
+    frames = chat("hello there")
+    err = next((d for k, d in frames if k == "error"), None)
+    kinds = [k for k, _ in frames]
+    check("a model that says nothing at all: an explicit empty_answer error, never a silent done",
+          err is not None and err["code"] == "empty_answer" and "done" not in kinds, kinds)
+    mock_cloud.STATE["ollama_small"] = set()
+
+    config.update_config({"ollama_num_ctx": 8192})
+    mock_cloud.STATE["ollama_small"] = {"plain"}
+    mock_cloud.STATE["requests"].clear()
+    mock_cloud.STATE["ollama_list_target"] = "workspace_list"
+    chat("JARVIS, list the files in my workspace.")
+    check("a context size set in Settings always wins",
+          requests_for("ollama")[0][2]["options"]["num_ctx"] == 8192)
+    config.update_config({"ollama_num_ctx": 0})
+    mock_cloud.STATE["ollama_small"] = set()
+    armory.delete_connection(files["id"])
+
+    # ------------------------------------------------------------------
     section("Keys never leave the backend")
     public = json.dumps([
         config.get_config(), json.loads(api.get_llm_connections(Request("GET", "/", {}, {}, b"")).body),

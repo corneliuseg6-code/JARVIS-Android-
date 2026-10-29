@@ -88,14 +88,27 @@ def chat_stream(
     except urllib.error.URLError as exc:
         raise OllamaError(str(exc.reason)) from exc
     with resp:
-        for raw in resp:
-            line = raw.decode("utf-8", "replace").strip()
-            if not line:
-                continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        try:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if chunk.get("error"):
+                    # Ollama reports a mid-stream failure (out of memory, a
+                    # crashed runner) as a line of its own; it must not read
+                    # as an answer that happened to be empty.
+                    raise OllamaError(str(chunk["error"])[:300])
+                yield chunk
+        except (TimeoutError, OSError) as exc:
+            # A phone model that stalls longer than the read timeout used to
+            # surface as a bare socket error; say what happened instead.
+            raise OllamaError(
+                f"Ollama stopped responding (no data for {int(timeout)} s): {exc}"
+            ) from exc
 
 
 def chat_once(model: str, messages: list[dict[str, Any]], *, timeout: float = 300.0) -> str:
