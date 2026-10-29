@@ -2,6 +2,38 @@
 
 ---
 
+# V4 Phase 2c — the cone under the rings, removed
+
+The large translucent "pyramid/cone" rising from under the rings toward the
+chat was the **hooded figure** drawn by `web/js/ui/backdrop.js`
+(`_figure()`): a hood and shoulders path filled with a blue gradient, with a
+dark ellipse for the opening. It was centred at 54.5 % of the screen height,
+with the shoulders running off the bottom.
+
+It was drawn only while the backdrop's cinematic scene was on, which is
+**full screen**, and it was the same in every activity state. THINKING
+did not cause it; it was simply visible then.
+
+The figure and its call are removed. The nebula wash, the particles and the
+full-screen scrim are unchanged.
+
+Verified in Chromium at 412×915, with real full screen entered through the
+button. The backdrop canvas was measured where the hood stood, before and
+after:
+
+| Region | Before | After |
+|---|---|---|
+| Hood | 36.6 | 19.5 (= background) |
+| Shoulders | 15.2 | 6.6 |
+| Control region (nebula + particles) | 16.7 | 16.9 |
+
+The same holds in idle, thinking, speaking and listening, and during a real
+chat turn. Home geometry is identical to the previous commit, and the
+browser suites (45 + 33 checks) and all test suites pass. Service-worker
+cache: `jarvis-v4-10-nofigure`.
+
+---
+
 # V4 Phase 2b — the AI TOOLS menu, and CLAUDE.md
 
 - **AI ☰ button** in the top-left corner, beside the existing ☰. It is

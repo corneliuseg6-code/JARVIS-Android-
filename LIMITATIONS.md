@@ -5,6 +5,18 @@ the result was observed.
 
 ---
 
+## V4 Phase 2c — cone removed
+
+- **Verified:** in Chromium with real full screen, by measuring pixels on
+  the backdrop canvas across every activity state (see CHANGES.md).
+- **Not verified on the phone itself.** No Android device is available to
+  the build session. Two things are needed on the phone:
+  - pull this branch (the screenshot shows a build without the AI ☰ button,
+    so the phone is on an older branch);
+  - close the PWA completely so cache `jarvis-v4-10-nofigure` loads.
+
+---
+
 ## V4 Phase 2b — the AI TOOLS menu
 
 - **Verified**, in Chromium at 412×915 and 360×800 (45 checks):

@@ -59,7 +59,7 @@ git checkout claude/v4-agent-system && git pull
 
 **After any update, the installed PWA must be closed completely** (not just
 backgrounded) or it keeps serving the old cached shell. The service-worker
-cache name is bumped every release — currently `jarvis-v4-9-tools` in
+cache name is bumped every release — currently `jarvis-v4-10-nofigure` in
 `web/sw.js`. Bump it whenever `web/` changes.
 
 ---
@@ -201,6 +201,8 @@ Browser suites are Playwright scripts in the scratchpad, not in the repo —
    diff, revert, resume, chat proposal tool); OpenArt over MCP with OAuth and
    credit approval. Setup: SETUP-V4-BRAIN.md. What is and is not verified:
    LIMITATIONS.md, "V4 Phase 2".
+   The full-screen backdrop no longer draws the hooded figure (the "cone"
+   under the rings), removed at the user's request.
    The **AI TOOLS menu** (top-left "AI ☰") shows every tool's real
    status and links to its settings; new tools are one `SECTIONS` entry in
    `web/js/ui/toolsmenu.js`.

@@ -9,10 +9,10 @@
  *     each one wanders on its own slow heading and turns gently as it goes.
  *     This layer runs in every mode.
  *
- *   - **The cinematic scene.** A nebula wash and a hooded figure, drawn only
- *     while full screen is on. The figure is drawn rather than photographed:
- *     the brief asks for a face that is not clearly visible, and a silhouette
- *     has none at all — and nothing has to be licensed or cached.
+ *   - **The cinematic scene.** A nebula wash, drawn only while full screen
+ *     is on. (A hooded figure used to be drawn here too; on a phone it read as
+ *     a large translucent cone rising from under the rings, and was removed
+ *     at the user's request.)
  *
  * Android is the target, so the particle layer is one batched path and one
  * fill per frame rather than a thousand draw calls, the canvas is capped well
@@ -113,7 +113,7 @@ export default class Backdrop {
     return changed;
   }
 
-  /** The figure and the nebula belong to full screen; the motes do not. */
+  /** The nebula belongs to full screen; the motes do not. */
   setCinematic(on) {
     this.cinematic = !!on;
   }
@@ -256,10 +256,7 @@ export default class Backdrop {
       ctx.clip('evenodd');
     }
 
-    if (this.cinematic) {
-      this._nebula(ctx, w, h, time);
-      this._figure(ctx, w, h);
-    }
+    if (this.cinematic) this._nebula(ctx, w, h, time);
 
     this._motes(ctx, w, h, time, dt);
 
@@ -348,83 +345,6 @@ export default class Backdrop {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
     }
-  }
-
-  /**
-   * The figure: head, hood and shoulders as one filled path.
-   *
-   * No eyes, no mouth, no edge light on the face — the hood's opening is
-   * filled darker than the cloth, so what reads is a covered head. Present
-   * and mysterious, not a portrait.
-   */
-  _figure(ctx, w, h) {
-    // Composed for a portrait phone: the crown sits under the dial and the
-    // shoulders run off the bottom, so she fills the middle of the screen
-    // without competing with the rings for the top band.
-    const cx = w * 0.5;
-    const headR = Math.min(w * 0.165, h * 0.082);
-    const headY = h * 0.545;
-    const base = h * 1.03;
-    const spread = Math.min(w * 0.56, h * 0.30);
-
-    ctx.save();
-
-    ctx.beginPath();
-    ctx.moveTo(cx - spread, base);
-    ctx.bezierCurveTo(
-      cx - spread * 0.86, headY + headR * 1.9,
-      cx - headR * 2.05, headY + headR * 0.80,
-      cx - headR * 1.46, headY - headR * 0.30,
-    );
-    // over the crown of the hood
-    ctx.bezierCurveTo(
-      cx - headR * 1.40, headY - headR * 2.12,
-      cx + headR * 1.40, headY - headR * 2.12,
-      cx + headR * 1.46, headY - headR * 0.30,
-    );
-    ctx.bezierCurveTo(
-      cx + headR * 2.05, headY + headR * 0.80,
-      cx + spread * 0.86, headY + headR * 1.9,
-      cx + spread, base,
-    );
-    ctx.closePath();
-
-    const cloth = ctx.createLinearGradient(0, headY - headR * 2, 0, base);
-    cloth.addColorStop(0, 'rgba(38, 112, 148, 0.95)');
-    cloth.addColorStop(0.42, 'rgba(14, 52, 80, 0.96)');
-    cloth.addColorStop(1, 'rgba(4, 16, 26, 0.98)');
-    ctx.fillStyle = cloth;
-    ctx.fill();
-
-    // A thin rim down the edge of the hood: what makes a flat silhouette
-    // read as a figure rather than a hole.
-    ctx.lineWidth = Math.max(1, headR * 0.035);
-    ctx.strokeStyle = 'rgba(140, 240, 248, 0.42)';
-    ctx.stroke();
-
-    // The opening of the hood: darker than the cloth, and empty.
-    ctx.beginPath();
-    ctx.ellipse(cx, headY + headR * 0.10, headR * 0.80, headR * 1.03, 0, 0, Math.PI * 2);
-    const inside = ctx.createRadialGradient(
-      cx, headY + headR * 0.35, headR * 0.10,
-      cx, headY + headR * 0.10, headR * 1.05,
-    );
-    inside.addColorStop(0, 'rgba(10, 30, 44, 0.96)');
-    inside.addColorStop(1, 'rgba(2, 8, 14, 0.99)');
-    ctx.fillStyle = inside;
-    ctx.fill();
-
-    // The one hint of a face: a glow where the eyes would be, far too diffuse
-    // to resolve into features.
-    const eyes = ctx.createRadialGradient(
-      cx, headY + headR * 0.05, 0, cx, headY + headR * 0.05, headR * 0.62,
-    );
-    eyes.addColorStop(0, 'rgba(96, 226, 255, 0.17)');
-    eyes.addColorStop(1, 'rgba(96, 226, 255, 0)');
-    ctx.fillStyle = eyes;
-    ctx.fill();
-
-    ctx.restore();
   }
 
   dispose() {

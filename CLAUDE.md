@@ -157,3 +157,9 @@ Add a line whenever a correction is confirmed (by the user or by a test).
 - Config clamps USD limits to cents, so tests must use values ≥ $0.01.
 - `http.server` header names keep the sender's capitalisation; compare them
   case-insensitively.
+- The full-screen backdrop must not draw figures or shapes. The hooded
+  figure in `backdrop.js` read as a cone under the rings and was removed;
+  only the nebula, particles and scrim belong there.
+- A phone screenshot may come from an older branch. Check what it shows
+  (e.g. is the AI ☰ button present?) before assuming it is the current
+  build.
