@@ -5,6 +5,22 @@ the result was observed.
 
 ---
 
+## V4 Phase 2e — chat scrolling
+
+- **Not tested on the phone.** Touch was emulated in Chromium with real
+  touch input and with the unclaimed-drag pointer sequence Android
+  produces. The actual Android gesture arbitration, momentum scrolling and
+  the real on-screen keyboard were not available.
+- The keyboard was simulated by shrinking the viewport, which is what
+  `interactive-widget=resizes-content` does on current Android Chrome. With
+  the keyboard up, the console still hides the hologram card, as designed
+  in an earlier release, to keep room for the conversation. That was left
+  unchanged.
+- Folding the panel with the grip still re-centres the console. That is
+  intentional and unchanged. Only scrolling no longer triggers it.
+
+---
+
 ## V4 Phase 2d — MCP tool-call fixes
 
 - **Not run against a real `qwen2.5:1.5b`.** Ollama, its model registry and

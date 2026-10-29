@@ -170,4 +170,10 @@ Add a line whenever a correction is confirmed (by the user or by a test).
   names leniently and never re-run an identical call within a turn.
 - Ollama silently truncates the *start* of an over-long prompt. Cap tool
   results for local models and give tool turns enough `num_ctx`.
+- A scrollable list must never drive a layout gesture. Android does not
+  claim a drag the list cannot scroll, so pointer events leak through.
+  Desktop Chromium hides this. Test with an unclaimed touch pointer drag.
+- In this container's headless Chromium, `Input.synthesizeScrollGesture`
+  does not scroll even a plain div. Use `Input.dispatchTouchEvent` for real
+  touch scrolling.
 

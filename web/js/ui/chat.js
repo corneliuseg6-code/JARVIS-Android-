@@ -111,7 +111,7 @@ export default class Chat {
   // ---------------------------------------------------------------- collapse
 
   /**
-   * Swipe the conversation down to clear the screen, up to bring it back.
+   * Drag the grip down to clear the screen, up to bring it back; or tap it.
    *
    * Pointer events rather than touch events: the same code then answers to a
    * finger on Android and to a mouse, which is also what makes the gesture
@@ -132,12 +132,10 @@ export default class Chat {
     let startHeight = 0;
     let dragging = false;
     let moved = 0;
-    let fromList = false;
 
-    const begin = (event, viaList) => {
+    const begin = (event) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return;
       dragging = true;
-      fromList = viaList;
       moved = 0;
       start = event.clientY;
       startHeight = this.panel.getBoundingClientRect().height;
@@ -149,14 +147,6 @@ export default class Chat {
       if (!dragging) return;
       const delta = event.clientY - start;
       moved = delta;
-      // A drag that began in the message list only counts while the list is
-      // at the very top and the finger is going down — otherwise it is a
-      // scroll and must be left alone.
-      if (fromList && (delta < 0 || this.messages.scrollTop > 0)) {
-        this._endDrag();
-        dragging = false;
-        return;
-      }
       event.preventDefault();
       const min = gripHeight();
       const max = this._maxPanelHeight();
@@ -190,7 +180,7 @@ export default class Chat {
       this.setCollapsed(target);
     };
 
-    this.grip?.addEventListener('pointerdown', (e) => begin(e, false));
+    this.grip?.addEventListener('pointerdown', (e) => begin(e));
     this.grip?.addEventListener('pointermove', move);
     this.grip?.addEventListener('pointerup', end);
     this.grip?.addEventListener('pointercancel', end);
@@ -201,21 +191,17 @@ export default class Chat {
       this.setCollapsed(!this.collapsed);
     });
 
-    // Swiping within the conversation itself, but only from the top of it.
-    this.messages?.addEventListener('pointerdown', (e) => {
-      if (e.pointerType === 'mouse') return;      // a mouse scrolls with the wheel
-      if (this.messages.scrollTop > 0) return;    // mid-scroll: not our gesture
-      begin(e, true);
-    });
-    this.messages?.addEventListener('pointermove', move);
-    this.messages?.addEventListener('pointerup', end);
-    this.messages?.addEventListener('pointercancel', end);
+    // The message list deliberately takes no part in this gesture. A swipe
+    // that started in the list used to collapse the panel whenever the list
+    // was at its top — always, for a short conversation — so an ordinary
+    // scroll made the whole console jump. Scrolling the messages only ever
+    // scrolls the messages; the grip is the one handle that folds the panel.
 
     // While collapsed the panel is only the grip, so an upward swipe there
     // is the way back.
     this.panel.addEventListener('pointerdown', (e) => {
       if (!this.collapsed || e.target === this.grip || this.grip?.contains(e.target)) return;
-      begin(e, false);
+      begin(e);
     });
     this.panel.addEventListener('pointermove', move);
     this.panel.addEventListener('pointerup', end);
@@ -225,11 +211,6 @@ export default class Chat {
     // The remembered state is applied without animating: a panel that slides
     // shut on every load would look like a glitch, not a preference.
     this.setCollapsed(this._remembered(), { silent: true, animate: false });
-  }
-
-  _endDrag() {
-    this.panel?.classList.remove('is-dragging');
-    if (this.panel) this.panel.style.maxHeight = '';
   }
 
   /** How tall the panel may grow: what the workspace can actually give it. */

@@ -2,6 +2,54 @@
 
 ---
 
+# V4 Phase 2e — scrolling the chat no longer moves the interface
+
+Reported from the phone with two screenshots: scrolling in the chat moved
+the whole interface (rings, HUD, avatar) between two positions.
+
+**Cause** (`web/js/ui/chat.js`, `_initCollapse`): the message list took
+part in the panel's swipe-to-collapse gesture.
+
+- A downward drag that started in the list collapsed the panel whenever the
+  list was at its top. A short conversation is always at its top.
+- Collapsing frees the panel's height, and the console re-centres in it, so
+  the dial jumps from y=103 to y=290. That is the difference between the
+  two screenshots. A later swipe or tap reopened the panel, and it jumped
+  back.
+- On Android the browser does not claim a drag that has nothing left to
+  scroll, so the pointer events reached the collapse handler.
+- Desktop Chromium claims such a drag and cancels it, which is why it never
+  showed up there.
+
+**Fix:** the message list no longer feeds the gesture at all. Scrolling the
+messages only scrolls the messages. The grip (the bar at the top of the
+panel) is the one handle that folds the panel, by drag or tap, as before.
+Nothing else changed: no CSS, no layout, no animation. The service-worker
+cache is `jarvis-v4-12-scrollfix`.
+
+**Verified** in Chromium at 412×915 with real touch input
+(`Input.dispatchTouchEvent`, native touch scrolling), 18 checks:
+
+- **Short chat:** downward and upward swipes in the list leave the panel
+  open and the dial at y=103.
+- **The Android case:** a drag the browser does not claim, delivered as
+  touch pointer events. On the previous commit it collapses the panel and
+  moves the dial to y=290; with the fix nothing moves.
+- **Long chat (40 messages):** the list scrolls to the top and back.
+  Overscroll at the top does nothing. The console, avatar, rails, panel and
+  input bar stay at identical coordinates, and the page itself never
+  scrolls.
+- **The grip:** tapping it still collapses the panel and restores the same
+  layout.
+- **Keyboard (viewport shrunk as `resizes-content` does):** the input bar
+  sits at the bottom of the visible area and stays focused, the messages
+  still scroll, and the layout returns exactly when the keyboard closes.
+- **Regressions:** home geometry is identical to the previous commit. The
+  browser suites (45 + 33) and all test suites pass, latency is unchanged,
+  and selftest is 71/71.
+
+---
+
 # V4 Phase 2d — MCP tool calls: no more silent turns
 
 Reported from the phone: with Ollama and both MCP servers connected, *"list
