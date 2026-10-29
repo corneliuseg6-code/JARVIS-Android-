@@ -46,6 +46,14 @@
       <span class="nav-bars" aria-hidden="true"></span>
     </button>
 
+    <!-- AI TOOLS: every AI model and agent, with live status. Compact on
+         purpose: the first line of the bar has ~15px to spare at 412px. -->
+    <button class="tools-btn" id="btn-tools" type="button" aria-controls="tools-menu"
+            aria-expanded="false" data-i18n-aria="tools.title" data-i18n-title="tools.title">
+      <span class="tools-btn-label" data-i18n="tools.short">AI</span>
+      <span class="tools-btn-bars" aria-hidden="true"></span>
+    </button>
+
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name" data-i18n="app.title">JARVIS</span>
@@ -317,6 +325,21 @@
       <button class="btn btn-danger btn-sm" id="btn-exit" type="button" data-i18n="power.exit">Exit</button>
     </div>
   </nav>
+
+  <!-- ===================== AI TOOLS menu =====================
+       Its own slide-out and its own scrim, so it never interferes with the
+       navigation drawer or the bottom sheet. Filled by ui/toolsmenu.js. -->
+  <div class="tools-scrim" id="tools-scrim" hidden></div>
+  <aside class="tools-menu" id="tools-menu" aria-hidden="true" data-i18n-aria="tools.title">
+    <div class="tm-head">
+      <span class="tm-glyph" aria-hidden="true"></span>
+      <h2 data-i18n="tools.title">AI Tools</h2>
+      <button class="icon-btn" id="btn-tools-refresh" type="button"
+              data-i18n-aria="tools.refresh" data-i18n-title="tools.refresh">↻</button>
+      <button class="icon-btn" id="btn-tools-close" type="button" data-i18n-aria="common.close">✕</button>
+    </div>
+    <div class="tm-body" id="tools-body"></div>
+  </aside>
 
   <!-- ===================== sheets ===================== -->
   <section class="sheet" id="sheet" hidden>

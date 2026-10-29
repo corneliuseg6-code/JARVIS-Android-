@@ -230,6 +230,74 @@ def get_llm_connections(req: Request) -> Response:
     })
 
 
+@router.get("/api/tools/overview")
+def get_tools_overview(req: Request) -> Response:
+    """
+    Everything the AI Tools menu shows, in one cheap call.
+
+    Real status without spending anything: the local Ollama is probed (free),
+    the brain in use reports its cached health, and a paid brain that is not
+    in use is *not* contacted — it reports its configuration and says
+    "not tested", with a Test button that lists models (unbilled). Claude
+    Code's detection and sign-in state are cached for a minute.
+    """
+    cfg = config.get_config()
+    active = llm.provider()
+    local = ollama.health(timeout=1.5)
+    live = llm.health(timeout=4.0) if active != llm.OLLAMA else None
+    models = []
+    for which in (llm.OPENAI, llm.CLAUDE, llm.GEMINI, llm.OLLAMA):
+        ok, reason = llm.usable(which)
+        if which == llm.OLLAMA:
+            state, detail = local.get("state", "unknown"), str(local.get("error") or "")
+        elif which == active and live is not None:
+            state, detail = live.get("state", "unknown"), str(live.get("detail") or "")
+        elif not cfg.get(f"{which}_enabled"):
+            state, detail = "off", ""
+        else:
+            state, detail = ("untested" if ok else "blocked"), ("" if ok else reason)
+        models.append({
+            "provider": which,
+            "label": llm.LABELS[which],
+            "active": which == active,
+            "billed": which in llm.BILLED,
+            "model": llm.active_model(which),
+            "usable": ok,
+            "reason": reason,
+            "state": state,
+            "detail": detail[:200],
+        })
+
+    found = claude_code._cached("detect", claude_code.detect)
+    auth = claude_code.auth_status(found["path"]) if found.get("installed") else {}
+    summary = usage.summary()
+    return Response({
+        "routing": llm.routing_mode(),
+        "models": models,
+        "spend": {"today": summary["today_total"], "daily_limit": summary["limits"]["daily"]},
+        "code": {
+            "installed": bool(found.get("installed")),
+            "version": found.get("version", ""),
+            "reason": found.get("reason", ""),
+            "enabled": claude_code.enabled(),
+            "workdir_set": claude_code.workdir() is not None,
+            "ready": claude_code.ready_cached(),
+            "signed_in": bool(auth.get("logged_in")),
+            "auth_known": bool(auth.get("known")),
+            "auth_method": auth.get("method", ""),
+            "pending": sum(1 for r in claude_code.recent() if r["state"] == "pending"),
+            "running": sum(1 for r in claude_code.recent() if r["state"] == "running"),
+        },
+        "openart": _openart_status(),
+        "mcp": [
+            {"id": c["id"], "name": c["name"], "state": c["state"], "error": c.get("error", ""),
+             "tools": len(c.get("tools") or []), "billed": bool(c.get("billed")),
+             "transport": c.get("transport", "")}
+            for c in armory.list_connections()
+        ],
+    })
+
+
 @router.post("/api/llm/route")
 def post_llm_route(req: Request) -> Response:
     """Who would answer this message, and why. Contacts nothing paid."""

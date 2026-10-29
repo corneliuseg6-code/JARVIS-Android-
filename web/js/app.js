@@ -27,6 +27,7 @@ import Chat from './ui/chat.js';
 import Armory from './ui/armory.js';
 import Eyes from './ui/eyes.js';
 import Connections from './ui/connections.js';
+import ToolsMenu from './ui/toolsmenu.js';
 import Fullscreen from './ui/fullscreen.js';
 import Shortcuts from './ui/shortcuts.js';
 import Clock from './ui/clock.js';
@@ -373,6 +374,7 @@ async function boot() {
       app.settings?.refresh?.();
     },
   }));
+  app.tools = guard('tools', () => new ToolsMenu({ openView: (view) => setView(view) }));
   app.settings = guard('settings', () => new Settings({
     onLanguageChange: (code) => applyLanguage(code),
     onConfigChange: (next) => {
@@ -458,6 +460,7 @@ async function boot() {
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (state.get('immersive')) setImmersive(false);
+    else if (app.tools?.isOpen()) app.tools.close();
     else if (root?.getAttribute('data-nav') === 'open') setNav(false);
     else if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
   });

@@ -98,6 +98,8 @@ export const api = {
   // Routing and costs. None of these contacts a paid provider.
   llmRoute: (message) => request('/api/llm/route', { method: 'POST', body: { message } }),
   usage: () => request('/api/usage'),
+  // The AI Tools menu: every tool's real state in one free call.
+  toolsOverview: () => request('/api/tools/overview', { timeout: 15000 }),
 
   // OpenArt, through its hosted MCP server. The sign-in tokens stay on the
   // backend; the browser only ever learns "signed in" or not.

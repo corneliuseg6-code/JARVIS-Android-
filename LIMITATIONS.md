@@ -5,6 +5,25 @@ the result was observed.
 
 ---
 
+## V4 Phase 2b — the AI TOOLS menu
+
+- **Verified**, in Chromium at 412×915 and 360×800 (45 checks):
+  - placement, and that nothing overflows;
+  - the four sections and their real states, matched against the backend;
+  - Use, Test, Set up, Connect and Manage;
+  - all four ways to close it;
+  - six languages;
+  - home-screen geometry identical to the previous commit;
+  - no JS errors.
+- **Not verified:** the swipe-to-close gesture on a real touchscreen. It was
+  driven with synthesised pointer events. Android's edge-back gesture may
+  compete with it; ✕ and tapping outside always work.
+- "Ready · not tested" is deliberate: a paid brain that is not in use is
+  never contacted just to colour a dot. Press Test to check it, which is
+  free.
+
+---
+
 ## V4 Phase 2 — the multi-AI brain, Claude Code, OpenArt
 
 ### Verified here

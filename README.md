@@ -19,7 +19,7 @@ The whole screen is one column, and only the visualiser grows:
 
 ```
 ┌──────────────────────────────────────┐
-│ ☰  JARVIS            ● IDLE      ⚙  │  top bar
+│ ☰ AI☰ JARVIS         ● IDLE   ⛶  ⚙  │  top bar
 │ ●SERVER ●OLLAMA ●VOICE ●TOOLS ●VISION│  status strip (scrolls sideways)
 │                                      │
 │                                      │
@@ -66,6 +66,7 @@ can take space from the visualiser or push a control off the screen.
 | **Magnifier** | In the drawer: a compact horizontal wedge that scales the whole interface. |
 | **Tool Armory** | MCP connections over stdio or HTTP, with credentials kept on the backend. |
 | **Chat** | Streaming answers, conversations saved on disk. |
+| **AI TOOLS menu** | The **AI ☰** button (top left) opens a slide-out with every AI model, Claude Code, OpenArt and the MCP connections: live status, Use / Test / Connect, and a link to each one's settings. |
 | **Four brains** | **Ollama** (local, free, offline — the default), **OpenAI**, **Claude** and **Gemini** (paid APIs, each off until switched on, acknowledged and keyed). Routing: Manual, Local only, Cloud only or Automatic, with fallback and a stated reason on every answer. MCP tools work on all four. Daily/monthly spending limits stop a paid brain before the call. Keys live only on the phone's backend. See **SETUP-V4-BRAIN.md**. |
 | **Claude Code agent** | Develops, edits and repairs projects in one working directory through the official `claude` CLI, only after you approve the exact command. Shows live progress, cost and a diff; edit runs can be reverted. JARVIS can queue a task from the chat; it never runs one itself. |
 | **OpenArt** | Image and video generation and editing through OpenArt's official MCP server, signed in on OpenArt's own page. Every credit-spending call waits for your approval; results are saved to the workspace and shown in the chat. |

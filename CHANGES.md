@@ -2,6 +2,49 @@
 
 ---
 
+# V4 Phase 2b — the AI TOOLS menu, and CLAUDE.md
+
+- **AI ☰ button** in the top-left corner, beside the existing ☰. It is
+  34×32 px. The label is translated: AI / IA / KI.
+- It opens a slide-out menu (`web/js/ui/toolsmenu.js`) with four sections,
+  each row showing its real status:
+  - **AI Models**: ChatGPT (labelled as the OpenAI API), Claude, Gemini,
+    Ollama;
+  - **Claude Code Agent**;
+  - **OpenArt Creative Studio**;
+  - **MCP Tools & Connections**.
+- Quick actions:
+  - **Use** switches the brain;
+  - **Test** lists models (free);
+  - **Connect / Disconnect** for MCP servers;
+  - **Set up / Open / Review** opens the existing card in AI Connections,
+    scrolled into view, or **Manage** opens the Tool Armory.
+- Closing: ✕, tapping outside, a leftward swipe, or Escape. The menu polls
+  only while open (every 10 s).
+- New sections are one entry in its `SECTIONS` registry.
+- `GET /api/tools/overview` reports every tool's real state in one call:
+  - the local Ollama is probed;
+  - the brain in use reports its cached health;
+  - a paid brain not in use is **not contacted** and says "not tested";
+  - Claude Code's detection and sign-in state are cached for a minute.
+- **The one visible trade-off:** the top bar's first line had about 15 px
+  to spare at 412 px. The full-screen button's label now hides at ≤430 px
+  instead of ≤400 px (it was already designated "the first thing to go").
+  It shows its ⛶ glyph only. Everything else is unchanged: the home
+  geometry is identical to the previous commit and the status pill is not
+  truncated at 412 px or 360 px.
+- 38 new strings × 6 languages (470 keys each). Service-worker cache:
+  `jarvis-v4-9-tools`.
+- **CLAUDE.md** records the architecture, standing decisions, coding rules,
+  the test procedure and the definition of done, Android setup, cost rules,
+  and a log of confirmed corrections.
+- Tests:
+  - `test_brain.py` has 112 checks (8 new, for the overview);
+  - a new Playwright menu suite has 45 checks at 412 and 360 px;
+  - the earlier 33-check flow still passes.
+
+---
+
 # V4 Phase 2 — the multi-AI brain, the Claude Code agent, OpenArt
 
 Branch `ccr-0204aa78-wihp2o`, cut from `claude/v4-agent-system` at `f33b6eb`.

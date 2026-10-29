@@ -336,6 +336,26 @@ try:
     mock_cloud.STATE["ollama_no_tools"] = False
 
     # ------------------------------------------------------------------
+    section("AI Tools menu: real status, no paid calls")
+    config.update_config({"routing_mode": "manual", "llm_provider": "claude", "gemini_enabled": False})
+    before = {svc: len(requests_for(svc)) for svc in ("openai", "anthropic", "gemini")}
+    overview = json.loads(api.get_tools_overview(Request("GET", "/", {}, {}, b"")).body)
+    states = {m["provider"]: m["state"] for m in overview["models"]}
+    check("models listed in menu order", [m["provider"] for m in overview["models"]]
+          == ["openai", "claude", "gemini", "ollama"])
+    check("the brain in use reports its live health", states["claude"] == "connected", states)
+    check("a usable paid brain not in use says 'untested'", states["openai"] == "untested", states)
+    check("a switched-off brain says 'off'", states["gemini"] == "off", states)
+    check("the local model is probed for real", states["ollama"] == "connected", states)
+    check("no paid completion or probe was spent on brains not in use",
+          len(requests_for("openai")) == before["openai"] and len(requests_for("gemini")) == before["gemini"])
+    check("Claude Code, OpenArt and MCP sections are present",
+          {"code", "openart", "mcp"} <= set(overview) and isinstance(overview["mcp"], list))
+    check("no secret in the overview",
+          not any(x in json.dumps(overview) for x in ("sk-test", "sk-ant-test", "AIza-test")))
+    config.update_config({"gemini_enabled": True})
+
+    # ------------------------------------------------------------------
     section("Keys never leave the backend")
     public = json.dumps([
         config.get_config(), json.loads(api.get_llm_connections(Request("GET", "/", {}, {}, b"")).body),

@@ -11,7 +11,8 @@ conversation. Last updated 2026-10-29.
 |---|---|
 | Repository | `corneliuseg6-code/JARVIS-Android-` |
 | **Development branch** | **`ccr-0204aa78-wihp2o`** — V4 Phase 2, cut from `claude/v4-agent-system` at `f33b6eb` |
-| Version | V4, Phase 2 complete: four brains with tools, routing, cost limits, Claude Code agent, OpenArt |
+| Version | V4, Phase 2 complete: four brains with tools, routing, cost limits, Claude Code agent, OpenArt, AI TOOLS menu |
+| Rules for agents | **`CLAUDE.md`** — read it first |
 | `main` | `c7c1fde` — **do not touch** |
 | `jarvis-v3-backup` | `766c3dd` — the frozen, working V3. **Never modify or delete.** |
 
@@ -58,7 +59,7 @@ git checkout claude/v4-agent-system && git pull
 
 **After any update, the installed PWA must be closed completely** (not just
 backgrounded) or it keeps serving the old cached shell. The service-worker
-cache name is bumped every release — currently `jarvis-v4-8-brain` in
+cache name is bumped every release — currently `jarvis-v4-9-tools` in
 `web/sw.js`. Bump it whenever `web/` changes.
 
 ---
@@ -118,6 +119,9 @@ tools/            MCP servers and the test suites
 - The layout invariants every browser test re-checks: dial **275 px**, the
   RINGS/FACE bar the same width as the dial, four shortcuts, and
   `scrollHeight <= 916` (the page must never scroll).
+- The top bar's first line is full at 412 px: the AI ☰ button fits only
+  because the full-screen label hides at ≤430 px. Adding anything else
+  there needs a design decision, not a squeeze.
 
 ---
 
@@ -132,7 +136,7 @@ python3 tools/test_toolcall.py      # 29
 python3 tools/test_websearch.py     # 88
 python3 tools/test_connections.py   # 44
 python3 tools/test_provider.py      # 35
-python3 tools/test_brain.py         # 104  → 431 checks, all passing (V4 Phase 2)
+python3 tools/test_brain.py         # 112  → 439 checks, all passing (V4 Phase 2)
 python3 tools/bench_chat.py         # latency against a fixed-rate stub
 ```
 
@@ -197,6 +201,9 @@ Browser suites are Playwright scripts in the scratchpad, not in the repo —
    diff, revert, resume, chat proposal tool); OpenArt over MCP with OAuth and
    credit approval. Setup: SETUP-V4-BRAIN.md. What is and is not verified:
    LIMITATIONS.md, "V4 Phase 2".
+   The **AI TOOLS menu** (top-left "AI ☰") shows every tool's real
+   status and links to its settings; new tools are one `SECTIONS` entry in
+   `web/js/ui/toolsmenu.js`.
 2. **Phase 3 — AI Control / Command Center.** Hierarchical dashboard with
    JARVIS as commander, per-agent ON/OFF, autonomy setting, live "who is
    doing what", honest labelling of model vs agent vs tool. (The routing
