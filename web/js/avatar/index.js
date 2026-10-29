@@ -34,7 +34,10 @@ export default class Avatar {
     // presented in two places — and the reference shows the face and the
     // rings on screen at the same time, not one instead of the other.
     this.canvasCard = canvasCard || null;
-    this.ctx = canvas2d.getContext('2d', { alpha: true, desynchronized: true });
+    // Never `desynchronized`: on Android Chrome a low-latency canvas is
+    // promoted to a hardware overlay plane that ignores alpha, so the whole
+    // canvas composites as an opaque black rectangle over the background.
+    this.ctx = canvas2d.getContext('2d', { alpha: true });
 
     this.rings = new RingsAvatar();
     this.face3d = canvasGl ? new Face3D() : null;

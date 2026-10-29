@@ -2,6 +2,23 @@
 
 ---
 
+# V4 Phase 1g — the black box behind the rings, actual cause
+
+Every earlier attempt changed CSS (the stage background, the standby veil),
+but the rectangle was never CSS. The rings canvas was created with
+`getContext('2d', { alpha: true, desynchronized: true })`. On Android Chrome a
+`desynchronized` (low-latency) canvas is promoted to a hardware overlay plane
+that does not honour alpha, so the whole canvas composites as an opaque black
+rectangle — on top of the page, ignoring `border-radius`, which is why it also
+clipped the edge of the right rail. Desktop browsers keep the alpha, so it
+never reproduced off the phone.
+
+The flag is removed; the canvas is an ordinary transparent 2D canvas and the
+particle field shows through around the rings. Nothing else changed. The
+service-worker cache is bumped so the phone picks up the new script.
+
+---
+
 # V4 Phase 1f — four layout fixes from the phone
 
 Reported from a real Galaxy screenshot. Two were reproduced exactly here; one
