@@ -21,9 +21,11 @@ import subprocess
 import threading
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
-PROTOCOL_VERSION = "2024-11-05"
+#: The streamable-HTTP transport and OAuth authorization arrived in
+#: 2025-03-26; a server may answer with an older version and we follow it.
+PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "jarvis-android", "version": "2.0.0"}
 
 
@@ -161,18 +163,30 @@ class StdioTransport(_BaseTransport):
 
 
 class HttpTransport(_BaseTransport):
-    def __init__(self, url: str, headers: dict[str, str] | None = None):
+    def __init__(self, url: str, headers: dict[str, str] | None = None,
+                 auth: Callable[[bool], str | None] | None = None):
         self._url = url
         self._headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         self._headers.update(headers or {})
         self._session_id: str | None = None
+        self._protocol: str | None = None
         self._next_id = 1
         self._lock = threading.Lock()
+        # auth(force_refresh) -> bearer token. Called again with True after a
+        # 401, so an expired OAuth access token is refreshed once and retried
+        # instead of failing the call.
+        self._auth = auth
 
-    def _post(self, payload: dict[str, Any], timeout: float) -> Any:
+    def _post(self, payload: dict[str, Any], timeout: float, *, retried: bool = False) -> Any:
         headers = dict(self._headers)
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
+        if self._protocol:
+            headers["MCP-Protocol-Version"] = self._protocol
+        if self._auth is not None:
+            token = self._auth(False)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(
             self._url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
@@ -184,6 +198,10 @@ class HttpTransport(_BaseTransport):
                 ctype = (resp.headers.get("Content-Type") or "").lower()
                 body = resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
+            if exc.code == 401 and self._auth is not None and not retried:
+                if self._auth(True):
+                    return self._post(payload, timeout, retried=True)
+                raise McpError("HTTP 401: sign-in expired; sign in again") from exc
             raise McpError(f"HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')[:200]}") from exc
         except urllib.error.URLError as exc:
             raise McpError(str(exc.reason)) from exc
@@ -244,6 +262,9 @@ class McpSession:
             timeout=timeout,
         ) or {}
         self.server_info = result.get("serverInfo", {}) or {}
+        if isinstance(self.transport, HttpTransport) and result.get("protocolVersion"):
+            # Streamable HTTP wants the negotiated version on every later request.
+            self.transport._protocol = str(result["protocolVersion"])
         self.capabilities = result.get("capabilities", {}) or {}
         try:
             self.transport.notify("notifications/initialized", {})

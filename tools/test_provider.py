@@ -149,8 +149,8 @@ def check_health_cache() -> None:
 
 def check_router() -> None:
     section("Router")
-    check("all three providers are offered",
-          set(llm.PROVIDERS) == {"ollama", "openai", "claude"})
+    check("all four providers are offered",
+          set(llm.PROVIDERS) == {"ollama", "openai", "claude", "gemini"})
     check("history window is clamped",
           2 <= llm.history_limit() <= 100, str(llm.history_limit()))
     check("a model is always resolved", bool(llm.active_model()), llm.active_model())

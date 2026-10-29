@@ -286,3 +286,121 @@ def _to_openai(message: dict[str, Any]) -> dict[str, Any]:
             "image_url": {"url": f"data:image/jpeg;base64,{raw}"},
         })
     return {"role": message.get("role", "user"), "content": parts}
+
+
+# --------------------------------------------------------------------------
+# tools + usage (V4)
+# --------------------------------------------------------------------------
+
+def _to_openai_full(message: dict[str, Any]) -> dict[str, Any]:
+    """Like _to_openai, plus the tool-call turns the tool loop produces."""
+    role = message.get("role", "user")
+    if role == "tool":
+        return {
+            "role": "tool",
+            "tool_call_id": str(message.get("tool_call_id") or message.get("name") or "call"),
+            "content": str(message.get("content") or ""),
+        }
+    if role == "assistant" and message.get("tool_calls"):
+        calls = []
+        for index, call in enumerate(message["tool_calls"]):
+            fn = call.get("function") or {}
+            args = fn.get("arguments")
+            calls.append({
+                "id": str(call.get("id") or f"call_{index}"),
+                "type": "function",
+                "function": {
+                    "name": fn.get("name", ""),
+                    # OpenAI sends arguments as a JSON string and wants them back
+                    # the same way; Ollama and our loop hold a dict.
+                    "arguments": args if isinstance(args, str) else json.dumps(args or {}),
+                },
+            })
+        return {"role": "assistant", "content": message.get("content") or None, "tool_calls": calls}
+    return _to_openai(message)
+
+
+def chat_stream_full(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    max_tokens: int | None = None,
+    timeout: float = 300.0,
+) -> Iterator[dict[str, Any]]:
+    """
+    Stream a turn and assemble it, tool calls and token usage included.
+
+    Yields ``{"type": "token"}`` while text arrives, then one
+    ``{"type": "message", "message": …, "usage": {"input", "output"}}``.
+    ``stream_options.include_usage`` makes OpenAI send a final chunk with the
+    real token counts, which is what the cost ledger records.
+    """
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [_to_openai_full(m) for m in messages],
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    if tools:
+        payload["tools"] = tools
+    if max_tokens:
+        payload["max_completion_tokens"] = int(max_tokens)
+
+    text: list[str] = []
+    calls: dict[int, dict[str, Any]] = {}
+    usage = {"input": 0, "output": 0}
+    finish = ""
+
+    response = _request("/chat/completions", payload, timeout=timeout, stream=True)
+    with response:
+        for raw in response:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("usage"):
+                usage["input"] = int(chunk["usage"].get("prompt_tokens") or 0)
+                usage["output"] = int(chunk["usage"].get("completion_tokens") or 0)
+            for choice in chunk.get("choices") or []:
+                delta = choice.get("delta") or {}
+                piece = delta.get("content") or ""
+                if piece:
+                    text.append(piece)
+                    if not calls:
+                        yield {"type": "token", "text": piece}
+                for part in delta.get("tool_calls") or []:
+                    slot = calls.setdefault(int(part.get("index") or 0),
+                                            {"id": "", "name": "", "arguments": ""})
+                    if part.get("id"):
+                        slot["id"] = part["id"]
+                    fn = part.get("function") or {}
+                    if fn.get("name"):
+                        slot["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        slot["arguments"] += fn["arguments"]
+                finish = choice.get("finish_reason") or finish
+            # Keep reading after finish_reason: the usage chunk comes last.
+
+    message: dict[str, Any] = {"role": "assistant", "content": "".join(text)}
+    if calls:
+        assembled = []
+        for index in sorted(calls):
+            slot = calls[index]
+            try:
+                args = json.loads(slot["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            assembled.append({
+                "id": slot["id"] or f"call_{index}",
+                "type": "function",
+                "function": {"name": slot["name"], "arguments": args},
+            })
+        message["tool_calls"] = assembled
+    yield {"type": "message", "message": message, "usage": usage, "stop": finish}

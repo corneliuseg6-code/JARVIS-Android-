@@ -26,7 +26,9 @@ none is read back out.
 
 Approval
 --------
-Nothing runs without a round trip. ``propose()`` records a request and returns
+Nothing runs without a round trip. JARVIS's chat can *propose* a task through
+its ``jarvis__claude_code`` tool, but only the user's tap in AI Connections
+runs it. ``propose()`` records a request and returns
 the exact argument vector that would be executed; only ``approve()`` starts it.
 Edits are a second gate on top: they need the setting enabled *and*
 ``allow_edits`` on the approval, and the default run is plan-only, which
@@ -35,8 +37,10 @@ cannot write. ``--dangerously-skip-permissions`` is never passed.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import signal
 import shutil
 import subprocess
 import threading
@@ -215,12 +219,102 @@ def _resolve_target(directory: str) -> Path:
 
 
 # --------------------------------------------------------------------------
+# what this CLI build supports, and whether it is signed in
+# --------------------------------------------------------------------------
+
+_CACHE_LOCK = threading.Lock()
+_CACHE: dict[str, Any] = {}
+CACHE_TTL = 60.0
+
+
+def _cached(key: str, compute, ttl: float = CACHE_TTL):
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        hit = _CACHE.get(key)
+        if hit and now - hit[0] < ttl:
+            return hit[1]
+    value = compute()
+    with _CACHE_LOCK:
+        _CACHE[key] = (time.monotonic(), value)
+    return value
+
+
+def clear_cache() -> None:
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+
+def _help_text(binary: str) -> str:
+    try:
+        done = subprocess.run([binary, "--help"], capture_output=True, text=True,
+                              timeout=15, check=False)
+        return (done.stdout or "") + (done.stderr or "")
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def supports(binary: str, flag: str) -> bool:
+    """
+    Does this build of the CLI know `flag`?
+
+    Builds on community ports lag behind, and an unknown option makes the
+    whole run fail. When the help text is not recognisably Claude Code's,
+    the flag is assumed present, so a stub or wrapper is not crippled.
+    """
+    text = _cached(f"help:{binary}", lambda: _help_text(binary), ttl=3600.0)
+    if "--print" not in text:
+        return True
+    return flag in text
+
+
+def auth_status(binary: str | None = None) -> dict[str, Any]:
+    """
+    ``claude auth status`` — the CLI's own answer to "is it signed in, and how".
+
+    JARVIS reports this; it never reads the credentials themselves. A
+    subscription sign-in and an API key bill differently, and which one is in
+    use is the CLI's business, so the interface shows `auth_method` as the CLI
+    reports it rather than guessing.
+    """
+    binary = binary or shutil.which("claude")
+    if not binary:
+        return {"known": False, "logged_in": False, "method": "", "detail": "not installed"}
+
+    def run() -> dict[str, Any]:
+        try:
+            done = subprocess.run([binary, "auth", "status", "--json"], capture_output=True,
+                                  text=True, timeout=20, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"known": False, "logged_in": False, "method": "", "detail": str(exc)[:200]}
+        try:
+            data = json.loads(done.stdout or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        if not isinstance(data, dict) or "loggedIn" not in data:
+            text = (done.stderr or done.stdout or "").strip().splitlines()
+            return {"known": False, "logged_in": False, "method": "",
+                    "detail": (text[0][:200] if text else "this CLI cannot report its sign-in")}
+        return {"known": True, "logged_in": bool(data.get("loggedIn")),
+                "method": str(data.get("authMethod") or ""),
+                "api_provider": str(data.get("apiProvider") or ""), "detail": ""}
+
+    return _cached(f"auth:{binary}", run)
+
+
+def ready_cached() -> bool:
+    """Cheap readiness for the chat catalogue: no subprocess per message."""
+    if not enabled() or workdir() is None:
+        return False
+    return bool(_cached("detect", detect)["installed"])
+
+
+# --------------------------------------------------------------------------
 # the request queue
 # --------------------------------------------------------------------------
 
 def _public(record: dict[str, Any]) -> dict[str, Any]:
-    """What the browser may see: everything except the live process handle."""
-    return {k: v for k, v in record.items() if k != "_thread"}
+    """What the browser may see: everything except live handles."""
+    return {k: v for k, v in record.items() if not k.startswith("_")}
 
 
 def _remember(record: dict[str, Any]) -> None:
@@ -244,25 +338,88 @@ def recent() -> list[dict[str, Any]]:
         return [_public(_REQUESTS[i]) for i in reversed(_ORDER) if i in _REQUESTS]
 
 
-def _argv(binary: str, prompt: str, target: Path, mode: str, model: str, turns: int) -> list[str]:
+def _argv(binary: str, prompt: str, target: Path, mode: str, model: str, turns: int,
+          *, resume: str = "") -> list[str]:
+    cfg = config.get_config()
     argv = [
         binary,
         "-p", prompt,
-        "--output-format", "json",
+        # stream-json: one JSON event per line, so the interface can show the
+        # run as it happens and the final event carries the cost.
+        "--output-format", "stream-json", "--verbose",
         "--permission-mode", _CLI_MODE[mode],
         "--max-turns", str(turns),
         "--add-dir", str(target),
     ]
-    if mode == PLAN:
-        # Plan mode already refuses to write. --restricted also takes away the
-        # tools that run commands, so a plan-only request cannot shell out.
-        argv.append("--restricted")
+    extra_tools = str(cfg.get("claude_code_allowed_tools") or "").strip()
+    if supports(binary, "--restricted"):
+        # Restricted removes the tools that run commands, confines file tools
+        # to the working directory and refuses bypassPermissions. A plan run
+        # is always restricted; an edit run too, unless the user has granted
+        # specific shell commands in settings.
+        if mode == PLAN or "Bash" not in extra_tools:
+            argv.append("--restricted")
+    if mode == EDIT and extra_tools:
+        argv += ["--allowedTools", extra_tools]
+    if supports(binary, "--permission-prompts"):
+        # Headless: nobody is there to answer a prompt, so anything that would
+        # ask is refused rather than left hanging.
+        argv += ["--permission-prompts", "none"]
+    try:
+        budget = float(cfg.get("claude_code_max_budget_usd") or 0)
+    except (TypeError, ValueError):
+        budget = 0.0
+    if budget > 0 and supports(binary, "--max-budget-usd"):
+        argv += ["--max-budget-usd", f"{budget:.2f}"]
     if model:
         argv += ["--model", model]
+    if resume:
+        argv += ["--resume", resume]
     return argv
 
 
-def propose(prompt: str, *, directory: str = "", mode: str = PLAN) -> dict[str, Any]:
+TOOL_SPEC: dict[str, Any] = {
+    "description": (
+        "Queue a software task for Claude Code, the coding agent, to work on a "
+        "project in the user's configured projects folder: explain or review "
+        "code (mode 'plan', read-only) or develop, edit and repair it (mode "
+        "'edit'). This does NOT run anything: the user must read and approve the "
+        "exact command in AI Connections first. Use it when the user asks for "
+        "real work on their code; tell them it is waiting for their approval."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task": {"type": "string", "description": "What Claude Code should do, in full."},
+            "mode": {"type": "string", "enum": ["plan", "edit"],
+                     "description": "plan = read and report only; edit = may change files."},
+            "directory": {"type": "string",
+                          "description": "Optional project subfolder, relative to the projects folder."},
+        },
+        "required": ["task"],
+    },
+}
+
+
+def propose_from_tool(arguments: dict[str, Any]) -> dict[str, Any]:
+    """The chat tool's entry point: same gates as the interface, plus a tag."""
+    mode = str(arguments.get("mode") or PLAN).lower()
+    if mode not in MODES:
+        mode = PLAN
+    if mode == EDIT and not allow_edits_configured():
+        # Downgrade rather than fail: the user can still see a plan, and the
+        # card says edits are off.
+        mode = PLAN
+    record = propose(str(arguments.get("task") or arguments.get("prompt") or ""),
+                     directory=str(arguments.get("directory") or ""), mode=mode)
+    with _LOCK:
+        if record["id"] in _REQUESTS:
+            _REQUESTS[record["id"]]["origin"] = "chat"
+    return {**record, "origin": "chat"}
+
+
+def propose(prompt: str, *, directory: str = "", mode: str = PLAN,
+            resume: str = "") -> dict[str, Any]:
     """
     Record what JARVIS would like to run. Nothing is executed.
 
@@ -285,6 +442,8 @@ def propose(prompt: str, *, directory: str = "", mode: str = PLAN) -> dict[str, 
             "edits_not_allowed",
             "File edits are switched off. Turn them on in AI Connections first.",
         )
+    if resume and not all(c.isalnum() or c == "-" for c in resume):
+        raise CodeError("bad_session", "That session id is not valid.")
 
     target = _resolve_target(directory)
     cfg = config.get_config()
@@ -302,13 +461,20 @@ def propose(prompt: str, *, directory: str = "", mode: str = PLAN) -> dict[str, 
         "state": "pending",
         "argv": _argv(
             found["path"], prompt, target, mode,
-            str(cfg.get("claude_code_model") or "").strip(), turns,
+            str(cfg.get("claude_code_model") or "").strip(), turns, resume=resume,
         ),
         "version": found["version"],
+        "origin": "user",
+        "resume": resume,
         "result": "",
         "error": "",
+        "progress": [],
+        "session_id": "",
+        "cost_usd": None,
+        "changes": None,
         "finished": 0.0,
-        "_thread": None,
+        "_proc": None,
+        "_before": None,
     }
     _remember(record)
     return _public(record)
@@ -324,6 +490,24 @@ def cancel(request_id: str) -> dict[str, Any]:
         record["state"] = "cancelled"
         record["finished"] = time.time()
         return _public(record)
+
+
+def stop(request_id: str) -> dict[str, Any]:
+    """Stop a running request. Whatever it already changed stays changed."""
+    with _LOCK:
+        record = _REQUESTS.get(request_id)
+        if record is None:
+            raise CodeError("unknown_request", "That request has expired or never existed.")
+        if record["state"] != "running":
+            raise CodeError("not_running", "That request is not running.")
+        proc = record.get("_proc")
+        record["stopped"] = True
+    if proc is not None:
+        try:
+            proc.send_signal(signal.SIGTERM)
+        except OSError:
+            pass
+    return get(request_id)
 
 
 def approve(request_id: str, *, allow_edits: bool = False) -> dict[str, Any]:
@@ -351,53 +535,261 @@ def approve(request_id: str, *, allow_edits: bool = False) -> dict[str, Any]:
         record["state"] = "running"
         record["started"] = time.time()
         thread = threading.Thread(target=_run, args=(record,), daemon=True)
-        record["_thread"] = thread
     thread.start()
     return _public(record)
 
 
-def _run(record: dict[str, Any]) -> None:
+# --------------------------------------------------------------------------
+# running, and seeing what changed
+# --------------------------------------------------------------------------
+
+def _git(directory: str, *args: str) -> str | None:
     try:
-        done = subprocess.run(
+        done = subprocess.run(["git", "-C", directory, *args], capture_output=True, text=True,
+                              timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _snapshot(directory: str) -> dict[str, Any]:
+    """
+    The state of the project before a run, to compare against after it.
+
+    In a git repository: which paths were already dirty. Elsewhere: size and
+    mtime of up to 5000 files, which is enough to say what changed.
+    """
+    top = _git(directory, "rev-parse", "--show-toplevel")
+    if top is not None:
+        status = _git(directory, "status", "--porcelain", "-uall", "--", ".") or ""
+        return {"git": True, "top": top.strip(), "dirty": sorted(_porcelain_paths(status))}
+    files: dict[str, tuple[int, float]] = {}
+    base = Path(directory)
+    for path in base.rglob("*"):
+        if len(files) >= 5000:
+            break
+        if any(part.startswith(".") for part in path.relative_to(base).parts):
+            continue
+        try:
+            if path.is_file():
+                st = path.stat()
+                files[path.relative_to(base).as_posix()] = (st.st_size, st.st_mtime)
+        except OSError:
+            continue
+    return {"git": False, "files": files}
+
+
+def _porcelain_paths(status: str) -> set[str]:
+    out = set()
+    for line in status.splitlines():
+        if len(line) > 3:
+            name = line[3:]
+            if " -> " in name:
+                name = name.split(" -> ", 1)[1]
+            out.add(name.strip().strip('"'))
+    return out
+
+
+def _changes(directory: str, before: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not before:
+        return None
+    if before.get("git"):
+        status = _git(directory, "status", "--porcelain", "-uall", "--", ".") or ""
+        now_dirty = _porcelain_paths(status)
+        touched = sorted(now_dirty - set(before["dirty"]))
+        untracked = {line[3:].strip() for line in status.splitlines() if line.startswith("??")}
+        diff = _git(directory, "diff", "--", *touched) if touched else ""
+        return {
+            "git": True,
+            "files": touched,
+            "new_files": sorted(set(touched) & untracked),
+            # Files that were already modified before the run cannot be told
+            # apart from the run's own edits, so they are named, not diffed.
+            "already_dirty": before["dirty"][:50],
+            "diff": (diff or "")[:30000],
+            "revertible": bool(touched),
+        }
+    after = _snapshot(directory)
+    old, new = before.get("files") or {}, after.get("files") or {}
+    changed = sorted(p for p in new if p not in old or new[p] != old[p])
+    removed = sorted(p for p in old if p not in new)
+    return {"git": False, "files": changed, "removed": removed, "diff": "", "revertible": False}
+
+
+def _run(record: dict[str, Any]) -> None:
+    if record["mode"] == EDIT:
+        record["_before"] = _snapshot(record["directory"])
+    try:
+        proc = subprocess.Popen(
             record["argv"],
             cwd=record["directory"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             text=True,
-            timeout=RUN_TIMEOUT,
-            check=False,
             # The binary's own environment, unchanged: Claude Code owns its
             # credentials and JARVIS has no business adding to or reading them.
             env=os.environ.copy(),
         )
-    except subprocess.TimeoutExpired:
-        _finish(record, "error", error=f"The run exceeded {int(RUN_TIMEOUT)}s and was stopped.")
-        return
     except OSError as exc:
         _finish(record, "error", error=f"Could not run Claude Code: {exc.strerror or exc}")
         return
+    with _LOCK:
+        record["_proc"] = proc
 
-    if done.returncode != 0:
-        detail = (done.stderr or done.stdout or "").strip()
-        _finish(record, "error", error=detail[:2000] or f"Exited with {done.returncode}.")
+    # stderr is drained on its own thread: a chatty CLI filling the pipe
+    # while stdout is being read would otherwise deadlock both.
+    err_parts: list[str] = []
+    drain = threading.Thread(target=lambda: err_parts.append(proc.stderr.read() if proc.stderr else ""),
+                             daemon=True)
+    drain.start()
+    timer = threading.Timer(RUN_TIMEOUT, lambda: proc.kill())
+    timer.daemon = True
+    timer.start()
+    final: dict[str, Any] = {}
+    raw_lines: list[str] = []
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            raw_lines.append(line)
+            del raw_lines[:-200]
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            _progress(record, event)
+            if event.get("type") == "result" or ("result" in event and "type" not in event):
+                final = event
+        code = proc.wait()
+        drain.join(timeout=5)
+        stderr = "".join(err_parts)
+    finally:
+        timer.cancel()
+
+    record["changes"] = _changes(record["directory"], record.get("_before"))
+    if final.get("total_cost_usd") is not None:
+        try:
+            record["cost_usd"] = round(float(final["total_cost_usd"]), 4)
+        except (TypeError, ValueError):
+            pass
+    if final.get("session_id"):
+        record["session_id"] = str(final["session_id"])
+
+    if record.get("stopped"):
+        _finish(record, "stopped", result=str(final.get("result") or ""),
+                error="Stopped by the user. Anything already changed stays changed.")
         return
-    _finish(record, "done", result=_text_of(done.stdout))
+    if code != 0 or final.get("is_error"):
+        detail = str(final.get("result") or "") or _STOP_REASONS.get(str(final.get("subtype") or ""), "")
+        if not detail and isinstance(final.get("errors"), list) and final["errors"]:
+            detail = "; ".join(str(e) for e in final["errors"])[:1000]
+        detail = detail or (stderr or "").strip() or "\n".join(raw_lines[-3:])
+        if code == -9 or code == 137:
+            detail = f"The run exceeded {int(RUN_TIMEOUT)}s and was stopped. " + detail
+        _finish(record, "error", result="", error=detail[:2000] or f"Exited with {code}.")
+        return
+    text = final.get("result")
+    if not isinstance(text, str):
+        text = "\n".join(raw_lines)[-20000:]
+    _finish(record, "done", result=text[:20000])
+
+
+#: The CLI's own stop reasons, said in words. A run that hits a limit stops
+#: cleanly; what it already did stays done.
+_STOP_REASONS = {
+    "error_max_budget_usd": "Stopped at the spending cap (AI Connections → Claude Code → "
+                            "budget). Raise it if this task needs more.",
+    "error_max_turns": "Stopped at the turn limit before finishing. Raise the turn limit "
+                       "or split the task.",
+    "error_during_execution": "Claude Code hit an error while working.",
+}
+
+
+def _progress(record: dict[str, Any], event: dict[str, Any]) -> None:
+    """One short line per step, so the user can watch the agent work."""
+    line = ""
+    kind = event.get("type")
+    if kind == "system" and event.get("subtype") == "init":
+        record["session_id"] = str(event.get("session_id") or "")
+        line = f"started ({event.get('model', 'default model')})"
+    elif kind == "assistant":
+        for block in (event.get("message") or {}).get("content") or []:
+            if block.get("type") == "tool_use":
+                args = block.get("input") or {}
+                target = args.get("file_path") or args.get("path") or args.get("pattern") \
+                    or args.get("command") or ""
+                line = f"{block.get('name', 'tool')} {str(target)[:120]}".strip()
+            elif block.get("type") == "text" and block.get("text"):
+                line = str(block["text"]).strip().splitlines()[0][:160]
+    if line:
+        with _LOCK:
+            record["progress"] = (record.get("progress") or []) + [line]
+            del record["progress"][:-40]
+
+
+def _finish(record: dict[str, Any], state: str, *, result: str = "", error: str = "") -> None:
+    with _LOCK:
+        record["state"] = state
+        record["result"] = result
+        record["error"] = error
+        record["finished"] = time.time()
+        record["_proc"] = None
+
+
+def revert(request_id: str, *, confirm: bool = False) -> dict[str, Any]:
+    """
+    Undo one edit run's changes, in a git repository only.
+
+    Only files the run itself changed are touched — files that were already
+    modified before it are left exactly as they were. Tracked files go back to
+    their committed content; files the run created are deleted.
+    """
+    if not confirm:
+        raise CodeError("confirm_required", "Reverting must be confirmed.")
+    with _LOCK:
+        record = _REQUESTS.get(request_id)
+    if record is None:
+        raise CodeError("unknown_request", "That request has expired or never existed.")
+    changes = record.get("changes") or {}
+    if record["state"] == "running":
+        raise CodeError("running", "Wait for the run to finish first.")
+    if not changes.get("git") or not changes.get("revertible"):
+        raise CodeError("not_revertible", "Only an edit run inside a git repository can be reverted.")
+    directory = record["directory"]
+    root = workdir()
+    new_files = set(changes.get("new_files") or [])
+    restored, deleted = [], []
+    for name in changes.get("files") or []:
+        path = (Path(directory) / name).resolve()
+        if root is None or (path != root and root not in path.parents):
+            continue
+        if name in new_files:
+            try:
+                path.unlink()
+                deleted.append(name)
+            except OSError:
+                pass
+        elif _git(directory, "checkout", "--", name) is not None:
+            restored.append(name)
+    with _LOCK:
+        record["changes"] = {**changes, "revertible": False, "reverted": True,
+                             "restored": restored, "deleted": deleted}
+    return _public(record)
 
 
 def _text_of(stdout: str) -> str:
-    """
-    Pull the answer out of `--output-format json`.
-
-    The documented shape carries the reply on `result`; anything else is
-    returned verbatim rather than being silently dropped.
-    """
-    import json as _json
-
+    """Pull the answer out of `--output-format json` (kept for older callers)."""
     raw = (stdout or "").strip()
     if not raw:
         return ""
     try:
-        payload = _json.loads(raw)
-    except _json.JSONDecodeError:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
         return raw[:20000]
     if isinstance(payload, dict):
         for key in ("result", "text", "content"):
@@ -407,29 +799,27 @@ def _text_of(stdout: str) -> str:
     return raw[:20000]
 
 
-def _finish(record: dict[str, Any], state: str, *, result: str = "", error: str = "") -> None:
-    with _LOCK:
-        record["state"] = state
-        record["result"] = result
-        record["error"] = error
-        record["finished"] = time.time()
-        record["_thread"] = None
-
-
 # --------------------------------------------------------------------------
 # status for the interface
 # --------------------------------------------------------------------------
 
 def status(timeout: float = 8.0) -> dict[str, Any]:
     info = detect(timeout=timeout)
+    with _CACHE_LOCK:
+        _CACHE["detect"] = (time.monotonic(), info)
     root = workdir()
     cfg = config.get_config()
+    auth = auth_status(info["path"]) if info["installed"] else \
+        {"known": False, "logged_in": False, "method": "", "detail": ""}
     info.update({
         "enabled": enabled(),
         "workdir": str(root) if root else "",
         "workdir_set": root is not None,
         "allow_edits": allow_edits_configured(),
         "model": str(cfg.get("claude_code_model") or ""),
+        "max_budget_usd": cfg.get("claude_code_max_budget_usd", 0),
+        "allowed_tools": cfg.get("claude_code_allowed_tools", ""),
+        "auth": auth,
         "pending": sum(1 for r in recent() if r["state"] == "pending"),
         # A request can only run when all of these are true; the interface
         # shows whichever one is missing instead of a generic failure.

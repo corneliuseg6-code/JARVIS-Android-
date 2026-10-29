@@ -221,8 +221,8 @@ try:
         check("plan mode is also --restricted", "--restricted" in argv)
         check("permissions are never skipped",
               not any("skip-permissions" in a for a in argv))
-        check("output is parsed, not scraped",
-              "--output-format" in argv and argv[argv.index("--output-format") + 1] == "json")
+        check("output is parsed, not scraped (one JSON event per line)",
+              "--output-format" in argv and argv[argv.index("--output-format") + 1] == "stream-json")
         check("a turn limit is always set", "--max-turns" in argv)
         check("proposing does not run anything", plan["state"] == "pending")
 

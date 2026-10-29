@@ -66,7 +66,7 @@ DEFAULTS: dict[str, Any] = {
     # Which brain answers. "ollama" is free, local and offline; "openai" is
     # a paid remote API. Switching to a billed provider needs an explicit
     # acknowledgement, enforced in update_config() rather than only in the UI.
-    "llm_provider": "ollama",            # "ollama" | "openai" | "claude"
+    "llm_provider": "ollama",            # "ollama" | "openai" | "claude" | "gemini"
     "openai_enabled": False,             # the connection may be used at all
     "openai_model": "gpt-4o-mini",
     "openai_vision_model": "",           # empty = use the chat model
@@ -79,6 +79,38 @@ DEFAULTS: dict[str, Any] = {
     "anthropic_base_url": "https://api.anthropic.com",
     "claude_cost_ack": False,
     "claude_effort": "low",              # low | medium | high — billed thinking
+    # --- Gemini (Google AI Studio / Gemini API) --------------------------
+    # A Gemini app subscription (Google One AI Premium etc.) is NOT API
+    # access: the API needs its own key from aistudio.google.com, billed or
+    # free-tier per Google's terms. Same two gates as the others.
+    "gemini_enabled": False,
+    "gemini_model": "gemini-2.5-flash",
+    "gemini_base_url": "https://generativelanguage.googleapis.com",
+    "gemini_cost_ack": False,
+    # --- routing ---------------------------------------------------------
+    # manual: always the brain picked in llm_provider (the V3 behaviour).
+    # local:  Ollama only; nothing leaves the phone.
+    # cloud:  the first usable paid brain in cloud_order.
+    # auto:   short everyday turns stay local; coding, long or research
+    #         turns go to a cloud brain — only one switched on, acknowledged,
+    #         keyed and under budget. Each answer says who answered and why.
+    "routing_mode": "manual",
+    "cloud_order": ["claude", "openai", "gemini"],
+    # When the chosen brain fails before answering (offline, out of credit,
+    # over budget) try the next usable one instead of failing the turn.
+    "auto_fallback": True,
+    # --- cost controls ---------------------------------------------------
+    # Estimated USD, from each provider's reported token counts. 0 = no
+    # limit. A reached limit is a hard stop for that provider.
+    "cost_daily_limit_usd": 2.0,
+    "cost_monthly_limit_usd": 20.0,
+    "openai_daily_limit_usd": 0.0,
+    "claude_daily_limit_usd": 0.0,
+    "gemini_daily_limit_usd": 0.0,
+    # Ceiling on one paid answer's length; bounds the worst case per turn.
+    "max_output_tokens": 4096,
+    # {"provider:model": [input, output]} USD per million tokens.
+    "price_overrides": {},
     # --- Claude Code (the local CLI) --------------------------------------
     # Off by default, and useless until a working directory is chosen. Edits
     # are a second switch on top of that; see server/claude_code.py.
@@ -87,6 +119,13 @@ DEFAULTS: dict[str, Any] = {
     "claude_code_workdir": "",
     "claude_code_model": "",             # empty = whatever the CLI defaults to
     "claude_code_max_turns": 6,
+    # Passed as --max-budget-usd: the CLI stops itself at this spend. Only
+    # meaningful when Claude Code bills an API key; a subscription login is
+    # metered by the plan instead.
+    "claude_code_max_budget_usd": 1.0,
+    # Extra tool permissions for edit runs, e.g. "Bash(npm test)". Empty:
+    # edits only, no shell. Anything else that would prompt is denied.
+    "claude_code_allowed_tools": "",
     # --- MCP tools in chat ------------------------------------------------
     # Off by default: a tool that changes something waits for the user, one
     # call at a time. Turning this on skips that per-call approval.
@@ -190,7 +229,7 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
     }
 
     # --- provider --------------------------------------------------------
-    if cfg.get("llm_provider") not in ("ollama", "openai", "claude"):
+    if cfg.get("llm_provider") not in ("ollama", "openai", "claude", "gemini"):
         cfg["llm_provider"] = "ollama"
     # A paid provider cannot be selected until it has been switched on AND its
     # cost notice acknowledged. Enforcing it here rather than only in the UI
@@ -204,6 +243,35 @@ def _clamp_v21(cfg: dict[str, Any]) -> None:
         cfg.get("claude_enabled") and cfg.get("claude_cost_ack")
     ):
         cfg["llm_provider"] = "ollama"
+    if cfg.get("llm_provider") == "gemini" and not (
+        cfg.get("gemini_enabled") and cfg.get("gemini_cost_ack")
+    ):
+        cfg["llm_provider"] = "ollama"
+    gemini_base = str(cfg.get("gemini_base_url") or "").strip()
+    cfg["gemini_base_url"] = gemini_base if gemini_base.startswith(("http://", "https://")) \
+        else DEFAULTS["gemini_base_url"]
+    if cfg.get("routing_mode") not in ("manual", "local", "cloud", "auto"):
+        cfg["routing_mode"] = "manual"
+    order = [p for p in (cfg.get("cloud_order") or []) if p in ("claude", "openai", "gemini")]
+    for p in DEFAULTS["cloud_order"]:
+        if p not in order:
+            order.append(p)
+    cfg["cloud_order"] = order
+    for key in ("cost_daily_limit_usd", "cost_monthly_limit_usd", "openai_daily_limit_usd",
+                "claude_daily_limit_usd", "gemini_daily_limit_usd", "claude_code_max_budget_usd"):
+        try:
+            value = float(cfg.get(key) or 0.0)
+        except (TypeError, ValueError):
+            value = float(DEFAULTS[key])
+        cfg[key] = round(max(0.0, min(10_000.0, value)), 2)
+    try:
+        out_tokens = int(cfg.get("max_output_tokens") or DEFAULTS["max_output_tokens"])
+    except (TypeError, ValueError):
+        out_tokens = DEFAULTS["max_output_tokens"]
+    cfg["max_output_tokens"] = max(256, min(64_000, out_tokens))
+    if not isinstance(cfg.get("price_overrides"), dict):
+        cfg["price_overrides"] = {}
+    cfg["claude_code_allowed_tools"] = str(cfg.get("claude_code_allowed_tools") or "").strip()[:400]
     base = str(cfg.get("openai_base_url") or "").strip()
     cfg["openai_base_url"] = base if base.startswith(("http://", "https://")) \
         else DEFAULTS["openai_base_url"]

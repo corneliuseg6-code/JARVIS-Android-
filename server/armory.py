@@ -68,6 +68,13 @@ def _sanitise(raw: dict[str, Any], conn_id: str) -> dict[str, Any]:
         },
         "autoconnect": bool(raw.get("autoconnect")),
         "enabled": raw.get("enabled", True) is not False,
+        # Every call may spend money or credits (OpenArt): held for approval
+        # one call at a time, whatever the tool claims about itself.
+        "billed": bool(raw.get("billed")),
+        # Sign-in through the MCP authorization flow (OAuth 2.1 + PKCE)
+        # instead of a pasted header. Tokens live in secrets.json.
+        "oauth": bool(raw.get("oauth")),
+        "preset": str(raw.get("preset") or "")[:40],
     }
 
 
@@ -176,6 +183,15 @@ def _build_transport(conn: dict[str, Any]):
     if not conn["url"]:
         raise McpError("no URL configured")
     headers: dict[str, str] = {}
+    auth = None
+    if conn.get("oauth"):
+        from . import oauth
+
+        if not oauth.access_token(conn["id"]):
+            raise McpError("not signed in: use Sign in on this connection first")
+
+        def auth(force: bool, _id: str = conn["id"]) -> str | None:
+            return oauth.access_token(_id, force_refresh=force)
     for header, secret_name in (conn.get("header_keys") or {}).items():
         value = config.get_secret(_secret_key(conn["id"], secret_name))
         if not value:
@@ -183,7 +199,7 @@ def _build_transport(conn: dict[str, Any]):
         headers[header] = value if header.lower() != "authorization" or value.lower().startswith(
             ("bearer ", "basic ", "token ")
         ) else f"Bearer {value}"
-    return HttpTransport(conn["url"], headers=headers)
+    return HttpTransport(conn["url"], headers=headers, auth=auth)
 
 
 def connect(conn_id: str) -> dict[str, Any]:
@@ -310,10 +326,14 @@ def bundled_presets() -> list[dict[str, Any]]:
 def all_tools() -> list[dict[str, Any]]:
     """Tools exposed by currently connected servers (for the chat tool loop)."""
     out: list[dict[str, Any]] = []
+    defined = {c["id"]: c for c in _load()}
     with _LOCK:
         for conn_id, status in _STATUS.items():
             if status["state"] != "connected":
                 continue
+            conn = defined.get(conn_id) or {}
             for tool in status["tools"]:
-                out.append({**tool, "connection_id": conn_id})
+                out.append({**tool, "connection_id": conn_id,
+                            "connection_name": conn.get("name", ""),
+                            "billed": bool(conn.get("billed"))})
     return out

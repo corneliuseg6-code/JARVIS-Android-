@@ -1,39 +1,54 @@
-"""Which brain is answering: a router over Ollama, OpenAI and Claude.
+"""Which brain is answering: a router over Ollama, OpenAI, Claude and Gemini.
 
-JARVIS can talk to a local Ollama (free, private, offline) or to one of two
-paid remote APIs. Everything above this module — the chat endpoint, the health
-report, EYES — asks the router rather than a provider, so adding a fourth one
-means writing a client and adding two lines here, not editing the API layer.
+JARVIS can talk to a local Ollama (free, private, offline) or to one of three
+paid remote APIs. Everything above this module — the chat endpoint, the tool
+loop, the health report, EYES — asks the router rather than a provider.
 
-Both clients already yield chunks in the same shape, so there is no format
-translation to do at this level; what the router adds is provider choice,
-model resolution and a single error type with codes the interface can
-translate.
+What the router owns
+--------------------
+* **Choice.** ``route()`` turns the routing mode (manual / local / cloud /
+  auto) into an ordered list of candidates, each with the reason it was
+  picked, so every answer can say who answered and why.
+* **Gates.** A paid provider is only a candidate when it is switched on, its
+  cost notice acknowledged, a key stored, and its budget not reached
+  (``usable()``). Nothing here can start spending on its own.
+* **Accounting.** Every paid turn's real token counts go to ``usage``; the
+  budget is checked before each paid call, not after.
+* **One shape.** All four clients yield ``{"type": "token"}`` events and one
+  ``{"type": "message"}``, with tool calls in the OpenAI/Ollama shape, so the
+  tool loop never knows which provider it is driving.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterator
 
-from . import anthropic_client, config, ollama, openai_client
+from . import anthropic_client, config, gemini_client, ollama, openai_client, usage
 
 OLLAMA = "ollama"
 OPENAI = "openai"
 CLAUDE = "claude"
-PROVIDERS = (OLLAMA, OPENAI, CLAUDE)
+GEMINI = "gemini"
+PROVIDERS = (OLLAMA, OPENAI, CLAUDE, GEMINI)
 
-#: Shown in the interface when a provider has no model configured.
 FALLBACK_MODEL = {
     OLLAMA: "llama3.2:3b",
     OPENAI: "gpt-4o-mini",
     CLAUDE: "claude-opus-5-5",
+    GEMINI: "gemini-2.5-flash",
 }
 
-LABELS = {OLLAMA: "Ollama", OPENAI: "OpenAI", CLAUDE: "Claude"}
+LABELS = {OLLAMA: "Ollama", OPENAI: "OpenAI", CLAUDE: "Claude", GEMINI: "Gemini"}
 
-#: Which providers cost money. Used for the cost notice and the "billed" flag
-#: the interface shows beside the active brain.
-BILLED = {OPENAI, CLAUDE}
+BILLED = {OPENAI, CLAUDE, GEMINI}
+
+CLIENTS = {OPENAI: openai_client, CLAUDE: anthropic_client, GEMINI: gemini_client}
+
+_MODEL_KEY = {OLLAMA: "chat_model", OPENAI: "openai_model", CLAUDE: "claude_model",
+              GEMINI: "gemini_model"}
+
+ROUTING_MODES = ("manual", "local", "cloud", "auto")
 
 
 class LLMError(RuntimeError):
@@ -47,28 +62,24 @@ class LLMError(RuntimeError):
 
 
 def provider() -> str:
-    """The configured provider, falling back to the free local one."""
+    """The brain picked by hand (llm_provider), falling back to Ollama."""
     chosen = (config.get_config().get("llm_provider") or OLLAMA).lower()
     return chosen if chosen in PROVIDERS else OLLAMA
 
 
+def routing_mode() -> str:
+    mode = config.get_config().get("routing_mode") or "manual"
+    return mode if mode in ROUTING_MODES else "manual"
+
+
 def active_model(which: str | None = None) -> str:
-    cfg = config.get_config()
     which = which or provider()
-    if which == OPENAI:
-        return (cfg.get("openai_model") or "").strip() or FALLBACK_MODEL[OPENAI]
-    if which == CLAUDE:
-        return (cfg.get("claude_model") or "").strip() or FALLBACK_MODEL[CLAUDE]
-    return (cfg.get("chat_model") or "").strip() or FALLBACK_MODEL[OLLAMA]
+    value = str(config.get_config().get(_MODEL_KEY.get(which, "chat_model")) or "").strip()
+    return value or FALLBACK_MODEL.get(which, FALLBACK_MODEL[OLLAMA])
 
 
 def history_limit() -> int:
-    """
-    How many past messages to resend.
-
-    This matters far more on OpenAI than on Ollama: every turn re-uploads the
-    whole window, so the window length is a direct multiplier on the bill.
-    """
+    """How many past messages to resend; on a paid API, a multiplier on the bill."""
     try:
         value = int(config.get_config().get("chat_history_limit") or 20)
     except (TypeError, ValueError):
@@ -77,54 +88,163 @@ def history_limit() -> int:
 
 
 # --------------------------------------------------------------------------
+# gates
+# --------------------------------------------------------------------------
+
+def usable(which: str) -> tuple[bool, str]:
+    """
+    (may this provider be used right now, and if not, why).
+
+    Configuration only — nothing is contacted. Ollama is always allowed; it
+    may still be offline, which the turn itself discovers.
+    """
+    if which == OLLAMA:
+        return True, ""
+    if which not in BILLED:
+        return False, "unknown provider"
+    cfg = config.get_config()
+    if not cfg.get(f"{which}_enabled"):
+        return False, f"{LABELS[which]} is switched off"
+    if not cfg.get(f"{which}_cost_ack"):
+        return False, f"{LABELS[which]}'s cost notice is not acknowledged"
+    if not CLIENTS[which].has_key():
+        return False, f"no {LABELS[which]} API key is stored"
+    try:
+        usage.check(which)
+    except usage.BudgetExceeded as exc:
+        return False, exc.detail
+    return True, ""
+
+
+# --------------------------------------------------------------------------
+# routing
+# --------------------------------------------------------------------------
+
+#: Signs that a turn is worth a stronger, paid model. Deliberately simple and
+#: visible: the reason shown with the answer names which rule matched.
+_CODE = re.compile(
+    r"```|\btraceback\b|\bstack ?trace\b|\bexception\b|\bsyntaxerror\b|\bdef \w+\(|"
+    r"\bfunction\s*\w*\(|\bclass \w+|\b(refactor|debug|compile|regex|sql|python|javascript|"
+    r"typescript|kotlin|java|rust|golang|bash|script|code|cod|codul|programm\w*|bug|fix)\b",
+    re.IGNORECASE,
+)
+_DEEP = re.compile(
+    r"\b(research|analy[sz]e|analiz\w*|compare|compar\w*|vergleich\w*|investiga\w*|"
+    r"step by step|in detail|detailed|detaliat\w*|plan|strategy|strategie|essay|report|"
+    r"raport|summari[sz]e|rezum\w*)\b",
+    re.IGNORECASE,
+)
+LONG_TURN = 600
+
+
+def classify(message: str, *, images: bool = False) -> tuple[str, str]:
+    """('simple' | 'complex', the rule that decided)."""
+    text = message or ""
+    if images:
+        return "complex", "it includes an image"
+    if _CODE.search(text):
+        return "complex", "it looks like a coding task"
+    if len(text) > LONG_TURN:
+        return "complex", f"it is long ({len(text)} characters)"
+    if _DEEP.search(text):
+        return "complex", "it asks for analysis or research"
+    return "simple", "it is a short everyday request"
+
+
+def _cloud_order(prefer: str | None = None) -> list[str]:
+    order = [p for p in config.get_config().get("cloud_order") or [] if p in BILLED]
+    for p in (CLAUDE, OPENAI, GEMINI):
+        if p not in order:
+            order.append(p)
+    if prefer and prefer in order:
+        order.remove(prefer)
+        order.insert(0, prefer)
+    return order
+
+
+def route(message: str = "", *, images: bool = False, ollama_up: bool | None = None) -> dict[str, Any]:
+    """
+    Decide who answers. Returns ``{"mode", "candidates": [{provider, model,
+    reason}], "skipped": [{provider, reason}]}``.
+
+    Candidates are tried in order; a later one is only used when every
+    earlier one failed before producing any output, and the interface is
+    told when that happens.
+    """
+    cfg = config.get_config()
+    mode = routing_mode()
+    fallback = bool(cfg.get("auto_fallback", True))
+    candidates: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    def add(which: str, reason: str) -> None:
+        if any(c["provider"] == which for c in candidates):
+            return
+        ok, why = usable(which)
+        if ok:
+            candidates.append({"provider": which, "model": active_model(which), "reason": reason})
+        else:
+            skipped.append({"provider": which, "reason": why})
+
+    if mode == "manual":
+        chosen = provider()
+        add(chosen, "chosen in AI Connections")
+        if fallback and chosen != OLLAMA:
+            add(OLLAMA, "fallback: the free local model")
+    elif mode == "local":
+        add(OLLAMA, "Local mode: nothing leaves the phone")
+    elif mode == "cloud":
+        for which in _cloud_order():
+            add(which, "Cloud mode")
+        if fallback:
+            add(OLLAMA, "fallback: no cloud brain answered")
+    else:  # auto
+        kind, why = classify(message, images=images)
+        if ollama_up is None:
+            ollama_up = ollama.health(timeout=1.5).get("state") == "connected"
+        coding = why == "it looks like a coding task"
+        if kind == "simple" and ollama_up:
+            add(OLLAMA, f"Automatic: local, because {why}")
+            for which in _cloud_order():
+                add(which, "Automatic: fallback to cloud")
+        else:
+            reason = f"Automatic: cloud, because {why}" if kind == "complex" \
+                else "Automatic: cloud, because the local model is offline"
+            for which in _cloud_order(CLAUDE if coding else None):
+                add(which, reason)
+            add(OLLAMA, "Automatic: no cloud brain is usable, staying local")
+    return {"mode": mode, "candidates": candidates, "skipped": skipped}
+
+
+# --------------------------------------------------------------------------
 # status
 # --------------------------------------------------------------------------
 
-def health(timeout: float = 6.0, *, force: bool = False) -> dict[str, Any]:
+def health(timeout: float = 6.0, *, force: bool = False, which: str | None = None) -> dict[str, Any]:
     """
-    The state of the provider that is actually in use.
+    The state of one provider (default: the hand-picked one).
 
-    The inactive provider is not contacted: polling OpenAI every twelve
-    seconds to colour a chip nobody is looking at would be both slow and, on
-    a metered account, rude. Background polls also reuse a briefly cached
-    answer; `force` is for when the user is looking straight at the panel.
+    Only that provider is contacted: probing a metered API every twelve
+    seconds to colour a chip nobody is looking at would be slow and rude.
     """
-    which = provider()
+    which = which or provider()
     model = active_model(which)
-    if which == OPENAI:
-        info = openai_client.health(timeout=timeout, force=force)
+    if which in CLIENTS:
+        info = CLIENTS[which].health(timeout=timeout, force=force)
         models = info.get("models", [])
-        ready = bool(models) and model in models
         return {
-            "provider": OPENAI,
-            "label": "OpenAI",
+            "provider": which,
+            "label": LABELS[which],
             "state": info.get("state", "unknown"),
             "model": model,
-            "model_ready": ready if models else info.get("state") == "connected",
+            "model_ready": (model in models) if models else info.get("state") == "connected",
             "models": models,
             "url": info.get("url", ""),
             "key_set": info.get("key_set", False),
             "error": info.get("error", ""),
             "detail": info.get("detail", ""),
             "billed": True,
-        }
-
-    if which == CLAUDE:
-        info = anthropic_client.health(timeout=timeout, force=force)
-        models = info.get("models", [])
-        ready = bool(models) and model in models
-        return {
-            "provider": CLAUDE,
-            "label": LABELS[CLAUDE],
-            "state": info.get("state", "unknown"),
-            "model": model,
-            "model_ready": ready if models else info.get("state") == "connected",
-            "models": models,
-            "url": info.get("url", ""),
-            "key_set": info.get("key_set", False),
-            "error": info.get("error", ""),
-            "detail": info.get("detail", ""),
-            "billed": True,
+            "routing": routing_mode(),
         }
 
     info = ollama.health(timeout=min(timeout, 3.0))
@@ -136,19 +256,18 @@ def health(timeout: float = 6.0, *, force: bool = False) -> dict[str, Any]:
         "model_ready": ollama.has_model(model) if info.get("state") == "connected" else False,
         "models": info.get("models", []),
         "url": info.get("url", ""),
-        "key_set": True,          # nothing to configure
+        "key_set": True,
         "error": info.get("error", ""),
         "detail": "",
         "billed": False,
+        "routing": routing_mode(),
     }
 
 
-def models(timeout: float = 8.0) -> list[str]:
-    which = provider()
-    if which == OPENAI:
-        return openai_client.list_models(timeout=timeout)
-    if which == CLAUDE:
-        return anthropic_client.list_models(timeout=timeout)
+def models(timeout: float = 8.0, which: str | None = None) -> list[str]:
+    which = which or provider()
+    if which in CLIENTS:
+        return CLIENTS[which].list_models(timeout=timeout)
     return ollama.list_models(timeout=timeout)
 
 
@@ -157,13 +276,7 @@ def models(timeout: float = 8.0) -> list[str]:
 # --------------------------------------------------------------------------
 
 def ollama_runtime() -> tuple[dict[str, Any], str]:
-    """
-    (options, keep_alive) for an Ollama request, from the user's settings.
-
-    Only values the user actually set are sent. An unset `num_ctx` is left to
-    Ollama's own default rather than guessed at, because raising it costs
-    memory and memory is the scarce thing on a phone.
-    """
+    """(options, keep_alive) for an Ollama request, from the user's settings."""
     cfg = config.get_config()
     options: dict[str, Any] = {}
     try:
@@ -185,14 +298,7 @@ def ollama_runtime() -> tuple[dict[str, Any], str]:
 def trim_history(
     messages: list[dict[str, Any]], *, budget: int | None = None,
 ) -> list[dict[str, Any]]:
-    """
-    Drop the oldest turns until the conversation fits a character budget.
-
-    `history_limit` counts messages, which cannot tell twenty short turns
-    from twenty long ones; the model re-reads all of it every turn either
-    way. The system message and the newest turn are always kept — without
-    them there is nothing to answer.
-    """
+    """Drop the oldest turns until the conversation fits a character budget."""
     if budget is None:
         try:
             budget = int(config.get_config().get("chat_char_budget") or 6000)
@@ -217,58 +323,20 @@ def trim_history(
     return [*head, *kept]
 
 
-def chat_stream(
-    messages: list[dict[str, Any]],
-    *,
-    model: str | None = None,
-    timeout: float = 300.0,
-) -> Iterator[dict[str, Any]]:
-    """Stream an answer from the active provider, in the Ollama chunk shape."""
-    which = provider()
-    chosen = (model or "").strip() or active_model(which)
+def _for_ollama(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Strip what only the paid clients understand."""
+    out = []
+    for m in messages:
+        clean = {k: v for k, v in m.items() if k not in ("_native", "tool_call_id", "is_error")}
+        out.append(clean)
+    return out
+
+
+def _max_tokens() -> int:
     try:
-        if which == OPENAI:
-            yield from openai_client.chat_stream(chosen, messages, timeout=timeout)
-        elif which == CLAUDE:
-            yield from anthropic_client.chat_stream(chosen, messages, timeout=timeout)
-        else:
-            options, keep_alive = ollama_runtime()
-            yield from ollama.chat_stream(chosen, messages, options=options,
-                                          keep_alive=keep_alive, timeout=timeout)
-    except openai_client.OpenAIError as exc:
-        raise LLMError(exc.code, exc.detail, OPENAI) from exc
-    except anthropic_client.AnthropicError as exc:
-        raise LLMError(exc.code, exc.detail, CLAUDE) from exc
-    except ollama.OllamaError as exc:
-        raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
-
-
-def chat_once_full(
-    messages: list[dict[str, Any]],
-    *,
-    model: str | None = None,
-    tools: list[dict[str, Any]] | None = None,
-    timeout: float = 300.0,
-) -> dict[str, Any]:
-    """
-    One non-streamed turn, returning the whole assistant message.
-
-    This is what the tool loop uses: it needs `tool_calls` intact, which a
-    streamed turn delivers in pieces. Only Ollama is wired for tools so far —
-    the paid providers fall back to a plain turn, so a tool-capable
-    conversation degrades to an ordinary one rather than failing.
-    """
-    which = provider()
-    chosen = (model or "").strip() or active_model(which)
-    try:
-        if which == OLLAMA:
-            options, keep_alive = ollama_runtime()
-            return ollama.chat_full(chosen, messages, options=options, tools=tools,
-                                    keep_alive=keep_alive, timeout=timeout)
-        text = chat_once(messages, model=chosen, timeout=timeout)
-        return {"role": "assistant", "content": text}
-    except ollama.OllamaError as exc:
-        raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
+        return int(config.get_config().get("max_output_tokens") or 4096)
+    except (TypeError, ValueError):
+        return 4096
 
 
 def chat_stream_full(
@@ -277,43 +345,102 @@ def chat_stream_full(
     model: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     timeout: float = 300.0,
+    which: str | None = None,
+    purpose: str = "chat",
 ) -> Iterator[dict[str, Any]]:
     """
-    Stream a turn while still assembling the complete message.
+    Stream one turn on one provider and assemble the complete message.
 
-    This is what the tool loop uses now. Yields ``{"type": "token"}`` events
-    as text arrives and one final ``{"type": "message"}`` carrying the whole
-    turn with its `tool_calls`, so the loop loses nothing by streaming.
-
-    A provider that cannot be handed tools streams plain text and reports a
-    message with no tool calls, which the loop reads as "it answered".
+    Yields ``{"type": "token"}`` as text arrives and one ``{"type":
+    "message", "message", "usage"}`` at the end, with `tool_calls` when the
+    model asked for tools. A paid provider is budget-checked before the call
+    and its reported usage recorded after it.
     """
-    which = provider()
+    which = which or provider()
     chosen = (model or "").strip() or active_model(which)
     try:
         if which == OLLAMA:
             options, keep_alive = ollama_runtime()
-            yield from ollama.chat_stream_full(
-                chosen, messages, options=options, tools=tools,
-                keep_alive=keep_alive, timeout=timeout)
+            for event in ollama.chat_stream_full(
+                    chosen, _for_ollama(messages), options=options, tools=tools,
+                    keep_alive=keep_alive, timeout=timeout):
+                if event["type"] == "message":
+                    event = {**event, "usage": {"input": 0, "output": 0}, "provider": OLLAMA}
+                yield event
             return
-        parts: list[str] = []
-        for chunk in chat_stream(messages, model=chosen, timeout=timeout):
-            piece = chunk.get("message", {}).get("content", "")
-            if piece:
-                parts.append(piece)
-                yield {"type": "token", "text": piece}
-            if chunk.get("done"):
-                break
-        yield {"type": "message",
-               "message": {"role": "assistant", "content": "".join(parts)}}
+
+        client = CLIENTS.get(which)
+        if client is None:
+            raise LLMError("unknown_provider", which, which)
+        try:
+            usage.check(which)
+        except usage.BudgetExceeded as exc:
+            raise LLMError("budget_exceeded", exc.detail, which) from exc
+
+        finished = started = False
+        try:
+            for event in client.chat_stream_full(chosen, messages, tools=tools,
+                                                 max_tokens=_max_tokens(), timeout=timeout):
+                started = True
+                if event["type"] == "message":
+                    spent = event.get("usage") or {}
+                    entry = usage.record(which, chosen, spent.get("input", 0),
+                                         spent.get("output", 0), purpose=purpose)
+                    finished = True
+                    event = {**event, "provider": which, "cost": entry}
+                yield event
+        finally:
+            if started and not finished:
+                # The stream broke or was abandoned before usage arrived.
+                # Record the call so it is visible, with zero known tokens.
+                usage.record(which, chosen, 0, 0, purpose=purpose, complete=False)
+    except openai_client.OpenAIError as exc:
+        raise LLMError(exc.code, exc.detail, OPENAI) from exc
+    except anthropic_client.AnthropicError as exc:
+        raise LLMError(exc.code, exc.detail, CLAUDE) from exc
+    except gemini_client.GeminiError as exc:
+        raise LLMError(exc.code, exc.detail, GEMINI) from exc
     except ollama.OllamaError as exc:
         raise LLMError("ollama_error", str(exc)[:300], OLLAMA) from exc
 
 
-def supports_tools() -> bool:
-    """Whether the active provider can be handed MCP tools."""
-    return provider() == OLLAMA
+def chat_stream(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    timeout: float = 300.0,
+    which: str | None = None,
+    purpose: str = "chat",
+) -> Iterator[dict[str, Any]]:
+    """Stream a plain answer, in the Ollama chunk shape."""
+    for event in chat_stream_full(messages, model=model, timeout=timeout, which=which,
+                                  purpose=purpose):
+        if event["type"] == "token":
+            yield {"message": {"content": event["text"]}, "done": False}
+        elif event["type"] == "message":
+            yield {"message": {"content": ""}, "done": True, "usage": event.get("usage"),
+                   "cost": event.get("cost")}
+
+
+def chat_once_full(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    timeout: float = 300.0,
+    which: str | None = None,
+) -> dict[str, Any]:
+    """One turn, returning the whole assistant message."""
+    message: dict[str, Any] = {"role": "assistant", "content": ""}
+    for event in chat_stream_full(messages, model=model, tools=tools, timeout=timeout, which=which):
+        if event["type"] == "message":
+            message = event["message"]
+    return message
+
+
+def supports_tools(which: str | None = None) -> bool:
+    """Every provider can be handed MCP tools now; Ollama depends on the model."""
+    return (which or provider()) in PROVIDERS
 
 
 def chat_once(
@@ -321,9 +448,11 @@ def chat_once(
     *,
     model: str | None = None,
     timeout: float = 300.0,
+    which: str | None = None,
+    purpose: str = "chat",
 ) -> str:
     parts: list[str] = []
-    for chunk in chat_stream(messages, model=model, timeout=timeout):
+    for chunk in chat_stream(messages, model=model, timeout=timeout, which=which, purpose=purpose):
         parts.append(chunk.get("message", {}).get("content", ""))
         if chunk.get("done"):
             break
@@ -336,14 +465,13 @@ def chat_once(
 
 def vision_model() -> str:
     cfg = config.get_config()
-    if provider() == CLAUDE:
-        # Claude takes images on the ordinary chat models, so a separate
-        # vision model is only needed if the user names one.
+    which = provider()
+    if which == CLAUDE:
         return (cfg.get("claude_vision_model") or "").strip() or active_model(CLAUDE)
-    if provider() == OPENAI:
-        # OpenAI's chat models take images directly, so unless the user has
-        # named a separate one the ordinary chat model does the job.
+    if which == OPENAI:
         return (cfg.get("openai_vision_model") or "").strip() or active_model(OPENAI)
+    if which == GEMINI:
+        return active_model(GEMINI)       # Gemini chat models take images
     return (cfg.get("vision_model") or "").strip()
 
 
@@ -351,14 +479,9 @@ def vision_ready() -> tuple[bool, str]:
     """(ready, note) — the note tells the user exactly what to do about it."""
     which = provider()
     model = vision_model()
-    if which == OPENAI:
-        if not openai_client.has_key():
-            return False, "No OpenAI API key is stored."
-        return True, ""
-    if which == CLAUDE:
-        if not anthropic_client.has_key():
-            return False, "No Anthropic API key is stored."
-        return True, ""
+    if which in CLIENTS:
+        ok, why = usable(which)
+        return (True, "") if ok else (False, why[:1].upper() + why[1:] + ".")
     if not model:
         return False, "No vision model is configured."
     if not ollama.has_model(model):

@@ -9,8 +9,8 @@ import time
 from typing import Any, Iterator
 
 from . import (
-    anthropic_client, armory, claude_code, config, conversations, llm, ollama,
-    openai_client, paths, toolchat, vision, voices, workspace,
+    anthropic_client, armory, claude_code, config, conversations, gemini_client, llm,
+    media, oauth, ollama, openai_client, paths, toolchat, usage, vision, voices, workspace,
 )
 
 #: Which secret store entry belongs to which provider. Keeping the mapping in
@@ -18,6 +18,7 @@ from . import (
 _KEYED_PROVIDERS = {
     llm.OPENAI: openai_client,
     llm.CLAUDE: anthropic_client,
+    llm.GEMINI: gemini_client,
 }
 from .app import HttpError, Request, Response, Router, sse
 
@@ -124,6 +125,7 @@ def post_config(req: Request) -> Response:
     for key in (
         "openai_api_key", "api_key", "openai:api_key",
         "anthropic_api_key", "claude_api_key", "anthropic:api_key",
+        "gemini_api_key", "google_api_key", "gemini:api_key",
     ):
         patch.pop(key, None)
     return Response(config.update_config(patch))
@@ -142,6 +144,7 @@ def get_llm_status(req: Request) -> Response:
     info["providers"] = list(llm.PROVIDERS)
     info["openai_key_set"] = openai_client.has_key()
     info["claude_key_set"] = anthropic_client.has_key()
+    info["gemini_key_set"] = gemini_client.has_key()
     return Response(info)
 
 
@@ -202,9 +205,48 @@ def get_llm_connections(req: Request) -> Response:
                 pricing={m: anthropic_client.price_of(m) for m in anthropic_client.SUGGESTED_MODELS},
                 effort=cfg.get("claude_effort", "low"),
             ),
+            entry(
+                llm.GEMINI,
+                enabled=bool(cfg.get("gemini_enabled")),
+                key_required=True,
+                key_set=gemini_client.has_key(),
+                cost_ack=bool(cfg.get("gemini_cost_ack")),
+                url=cfg.get("gemini_base_url", ""),
+                suggested_models=list(gemini_client.SUGGESTED_MODELS),
+                pricing={m: {"input": p[0], "output": p[1]}
+                         for m, p in usage.PRICES[llm.GEMINI].items()},
+            ),
         ],
+        "usable": {p: dict(zip(("ok", "reason"), llm.usable(p))) for p in llm.PROVIDERS},
+        "routing": {
+            "mode": llm.routing_mode(),
+            "cloud_order": cfg.get("cloud_order"),
+            "auto_fallback": bool(cfg.get("auto_fallback", True)),
+        },
+        "usage": usage.summary(),
         "code": claude_code.status(),
+        "openart": _openart_status(),
     })
+
+
+@router.post("/api/llm/route")
+def post_llm_route(req: Request) -> Response:
+    """Who would answer this message, and why. Contacts nothing paid."""
+    data = req.json()
+    return Response(llm.route(str(data.get("message") or "")))
+
+
+@router.get("/api/usage")
+def get_usage(req: Request) -> Response:
+    return Response(usage.summary())
+
+
+@router.post("/api/usage/reset")
+def post_usage_reset(req: Request) -> Response:
+    if not req.json().get("confirm"):
+        raise HttpError(400, "confirm_required")
+    usage.reset()
+    return Response(usage.summary())
 
 
 @router.post("/api/llm/test")
@@ -249,10 +291,13 @@ def post_llm_test(req: Request) -> Response:
 
 @router.get("/api/llm/models")
 def get_llm_models(req: Request) -> Response:
+    which = (req.q("provider") or llm.provider()).lower()
+    if which not in llm.PROVIDERS:
+        raise HttpError(400, "unknown provider")
     try:
-        return Response({"provider": llm.provider(), "models": llm.models()})
+        return Response({"provider": which, "models": llm.models(which=which)})
     except Exception as exc:  # noqa: BLE001 - reported, not raised at the UI
-        return Response({"provider": llm.provider(), "models": [], "error": str(exc)[:200]})
+        return Response({"provider": which, "models": [], "error": str(exc)[:200]})
 
 
 @router.post("/api/llm/key")
@@ -337,6 +382,39 @@ def post_chat_tool_approve(req: Request) -> Response:
         raise HttpError(400, str(exc)) from exc
 
 
+@router.post("/api/chat/tools/run")
+def post_chat_tool_run(req: Request) -> Response:
+    """
+    Approve and run one held call now, from its card in the chat.
+
+    For a billed connection (OpenArt) this is the moment credits are spent,
+    so the request must carry `confirm_spend` as well — the card asks.
+    """
+    data = req.json()
+    pending_id = str(data.get("id") or "")
+    match = next((p for p in toolchat.pending() if p["id"] == pending_id), None)
+    if match is None:
+        raise HttpError(400, "that request has expired or never existed")
+    if match.get("billed") and not data.get("confirm_spend"):
+        raise HttpError(400, "confirm_spend_required")
+    try:
+        outcome = toolchat.run_approved(pending_id)
+    except toolchat.ToolChatError as exc:
+        raise HttpError(400, str(exc)) from exc
+    conv_id = str(match.get("conversation_id") or "")
+    if conv_id:
+        # Put the outcome in the conversation, so the next turn knows it
+        # happened (or that it failed) without the user retelling it.
+        note = (f"[{match.get('connection') or 'tool'} · {outcome['tool']}] "
+                + ("ran: " if outcome.get("ran") else "did not run: ")
+                + str(outcome.get("text") or "")[:1500])
+        try:
+            conversations.append(conv_id, "assistant", note)
+        except Exception:  # noqa: BLE001
+            pass
+    return Response(outcome)
+
+
 @router.get("/api/code/status")
 def get_code_status(req: Request) -> Response:
     """Whether there is a usable CLI here, and if not, the actual reason."""
@@ -362,6 +440,7 @@ def post_code_request(req: Request) -> Response:
             str(data.get("prompt") or ""),
             directory=str(data.get("directory") or ""),
             mode=str(data.get("mode") or claude_code.PLAN),
+            resume=str(data.get("resume") or ""),
         )
     except claude_code.CodeError as exc:
         raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
@@ -388,6 +467,128 @@ def post_code_cancel(req: Request) -> Response:
         return Response(claude_code.cancel(str(req.json().get("id") or "")))
     except claude_code.CodeError as exc:
         raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
+
+
+@router.post("/api/code/stop")
+def post_code_stop(req: Request) -> Response:
+    try:
+        return Response(claude_code.stop(str(req.json().get("id") or "")))
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
+
+
+@router.post("/api/code/revert")
+def post_code_revert(req: Request) -> Response:
+    """Undo one edit run's own changes (git projects only). Must be confirmed."""
+    data = req.json()
+    try:
+        return Response(claude_code.revert(str(data.get("id") or ""),
+                                           confirm=bool(data.get("confirm"))))
+    except claude_code.CodeError as exc:
+        raise HttpError(400, f"{exc.code}: {exc.detail}") from exc
+
+
+# --------------------------------------------------------------------------
+# OpenArt — image and video generation through its official MCP server
+# --------------------------------------------------------------------------
+
+OPENART_URL = "https://mcp.openart.ai/mcp"
+OPENART_PRESET = "openart"
+
+
+def _openart_conn() -> dict[str, Any] | None:
+    for conn in armory.list_connections():
+        if conn.get("preset") == OPENART_PRESET:
+            return conn
+    return None
+
+
+def _openart_status() -> dict[str, Any]:
+    conn = _openart_conn()
+    if conn is None:
+        return {"configured": False, "url": OPENART_URL}
+    return {
+        "configured": True,
+        "id": conn["id"],
+        "url": conn.get("url", OPENART_URL),
+        "state": conn["state"],
+        "error": conn.get("error", ""),
+        "tools": [t.get("name") for t in conn.get("tools") or []],
+        "auth": oauth.status(conn["id"]),
+        "billed": bool(conn.get("billed")),
+    }
+
+
+@router.get("/api/openart/status")
+def get_openart_status(req: Request) -> Response:
+    return Response(_openart_status())
+
+
+@router.post("/api/openart/setup")
+def post_openart_setup(req: Request) -> Response:
+    """Add the OpenArt connection. Nothing is contacted until Sign in."""
+    if _openart_conn() is None:
+        armory.create_connection({
+            "name": "OpenArt", "transport": "http", "url": OPENART_URL,
+            "oauth": True, "billed": True, "preset": OPENART_PRESET, "autoconnect": False,
+        })
+    return Response(_openart_status())
+
+
+def _redirect_uri(req: Request) -> str:
+    """The loopback address the browser reached us on; never a remote host."""
+    host = (req.headers.get("Host") or "127.0.0.1:8787").strip()
+    name = host.rsplit(":", 1)[0].strip("[]")
+    if name not in ("127.0.0.1", "localhost", "::1"):
+        raise HttpError(400, "sign-in must be started from the phone itself (127.0.0.1)")
+    return f"http://{host}/api/oauth/callback"
+
+
+@router.post("/api/armory/<conn_id>/oauth/start")
+def post_oauth_start(req: Request) -> Response:
+    conn = armory.get_connection(req.params["conn_id"])
+    if conn is None:
+        raise HttpError(404, "unknown connection")
+    if not conn.get("oauth"):
+        raise HttpError(400, "this connection does not use sign-in")
+    try:
+        return Response(oauth.start(conn["id"], conn["url"], _redirect_uri(req)))
+    except oauth.OAuthError as exc:
+        raise HttpError(502, f"{exc.code}: {exc.detail}") from exc
+
+
+@router.post("/api/armory/<conn_id>/oauth/signout")
+def post_oauth_signout(req: Request) -> Response:
+    conn_id = req.params["conn_id"]
+    if armory.get_connection(conn_id) is None:
+        raise HttpError(404, "unknown connection")
+    armory.disconnect(conn_id)
+    oauth.sign_out(conn_id)
+    return Response({"signed_out": True, "auth": oauth.status(conn_id)})
+
+
+@router.get("/api/oauth/callback")
+def get_oauth_callback(req: Request) -> Response:
+    """Where the provider sends the browser back after sign-in."""
+    def page(title: str, body: str) -> Response:
+        import html as _html
+        markup = (
+            "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+            "<title>JARVIS</title><body style='font-family:sans-serif;background:#04121c;"
+            "color:#bfefff;padding:24px'><h2>" + _html.escape(title) + "</h2><p>"
+            + _html.escape(body) + "</p></body>")
+        return Response(markup.encode("utf-8"), content_type="text/html; charset=utf-8")
+
+    if req.q("error"):
+        return page("Sign-in cancelled", str(req.q("error_description") or req.q("error"))[:200])
+    try:
+        conn_id = oauth.finish(req.q("state") or "", req.q("code") or "")
+    except oauth.OAuthError as exc:
+        return page("Sign-in failed", exc.detail)
+    result = armory.connect(conn_id)
+    if result.get("state") == "connected":
+        return page("Signed in", "JARVIS is connected. You can close this tab and go back.")
+    return page("Signed in, but not connected", str(result.get("error") or "")[:200])
 
 
 @router.post("/api/power")
@@ -546,81 +747,127 @@ def post_chat(req: Request) -> Response:
 
     conversations.append(conv_id, "user", message, language=lang)
 
+    decision = llm.route(message)
+    candidates = decision["candidates"]
+    requested_model = (data.get("model") or "").strip()
+
     def stream() -> Iterator[bytes]:
+        first = candidates[0] if candidates else {"provider": llm.provider(), "model": model}
         yield sse("start", {
             "conversation_id": conv_id,
-            "model": model,
+            "model": first["model"],
             "language": lang,
-            "provider": llm.provider(),
+            "provider": first["provider"],
         })
+        # Who will answer and why, before a word is said. Skipped brains are
+        # listed with the reason, so "why not Claude?" has an answer on screen.
+        yield sse("route", {"mode": decision["mode"], "provider": first["provider"],
+                            "model": first["model"], "reason": first.get("reason", ""),
+                            "skipped": decision["skipped"]})
+        if not candidates:
+            yield sse("error", {"code": "no_provider", "provider": "",
+                                "detail": "; ".join(f"{s['provider']}: {s['reason']}"
+                                                    for s in decision["skipped"])[:300]})
+            return
+
         parts: list[str] = []
         started = time.time()
         first_token: float | None = None
-        # When a connected MCP server exposes tools and the active provider can
-        # take them, the turn goes through the tool loop instead of a plain
-        # stream: the model has to be handed the tools before it can ask for
-        # one. Without tools, or on a provider that cannot use them, nothing
-        # about the old path changes.
-        use_tools = llm.supports_tools() and toolchat.available()
-        try:
-            if use_tools:
-                for event in toolchat.run(messages, model=model, conversation_id=conv_id):
-                    kind = event.pop("type")
-                    if kind == "token":
-                        piece = event.get("text", "")
-                        if piece:
-                            parts.append(piece)
-                            if first_token is None:
-                                first_token = time.time() - started
-                            yield sse("token", {"text": piece})
-                    elif kind == "answer":
-                        text = event.get("text", "")
-                        # Already streamed token by token; sending it again
-                        # would duplicate the whole answer in the transcript.
-                        if text and not event.get("streamed"):
-                            parts.append(text)
-                            if first_token is None:
-                                first_token = time.time() - started
-                            yield sse("token", {"text": text})
-                    else:
-                        # tools / tool_call / tool_result / tool_approval go to
-                        # the interface as themselves, so the user sees which
-                        # tool ran and what it returned.
-                        yield sse(kind, event)
-                        # A tool working on a path inside the workspace is the
-                        # clearest signal of which project is live.
-                        if kind == "tool_call":
-                            spotted = workspace.detect(json.dumps(event.get("arguments") or {}))
-                            if spotted and spotted != workspace.active().get("path"):
-                                workspace.set_active(spotted, f"{event.get('tool', 'a tool')} is running")
-                                yield sse("workspace", {"active": spotted,
-                                                        "reason": "tool"})
-            else:
-                for chunk in llm.chat_stream(messages, model=model):
-                    piece = chunk.get("message", {}).get("content", "")
-                    if piece:
-                        parts.append(piece)
-                        if first_token is None:
-                            first_token = time.time() - started
-                        yield sse("token", {"text": piece})
-                    if chunk.get("done"):
+        spent = 0.0
+        answered_by = first
+        use_tools = toolchat.available()
+
+        for index, cand in enumerate(candidates):
+            which = cand["provider"]
+            chosen = cand["model"]
+            if index == 0 and requested_model and which == llm.provider():
+                chosen = requested_model
+            answered_by = {**cand, "model": chosen}
+            emitted = False
+            tools_this_turn = use_tools
+            try:
+                while True:
+                    try:
+                        if tools_this_turn:
+                            source = toolchat.run(messages, model=chosen, conversation_id=conv_id,
+                                                  which=which)
+                        else:
+                            source = (
+                                {"type": "token", "text": e["text"]} if e["type"] == "token"
+                                else {"type": "cost", **(e.get("cost") or {})}
+                                for e in llm.chat_stream_full(messages, model=chosen, which=which)
+                                if e["type"] == "token" or e.get("cost")
+                            )
+                        for event in source:
+                            kind = event.pop("type")
+                            if kind == "token":
+                                piece = event.get("text", "")
+                                if piece:
+                                    emitted = True
+                                    parts.append(piece)
+                                    if first_token is None:
+                                        first_token = time.time() - started
+                                    yield sse("token", {"text": piece})
+                            elif kind == "answer":
+                                text = event.get("text", "")
+                                if text and not event.get("streamed"):
+                                    emitted = True
+                                    parts.append(text)
+                                    if first_token is None:
+                                        first_token = time.time() - started
+                                    yield sse("token", {"text": text})
+                            elif kind == "cost":
+                                spent += float(event.get("usd") or 0.0)
+                                yield sse("cost", event)
+                            else:
+                                # tools / tool_call / tool_result / tool_approval /
+                                # code_request go to the interface as themselves.
+                                if kind != "tools":
+                                    emitted = True
+                                yield sse(kind, event)
+                                if kind == "tool_call":
+                                    spotted = workspace.detect(json.dumps(event.get("arguments") or {}))
+                                    if spotted and spotted != workspace.active().get("path"):
+                                        workspace.set_active(spotted, f"{event.get('tool', 'a tool')} is running")
+                                        yield sse("workspace", {"active": spotted, "reason": "tool"})
                         break
-        except toolchat.ToolChatError as exc:
-            yield sse("error", {"code": "tool_error", "detail": str(exc)[:300]})
-            return
-        except llm.LLMError as exc:
-            # The code is a stable token the interface translates; the detail
-            # is the provider's own words, which is what makes a bad key or an
-            # empty balance diagnosable from the phone.
-            yield sse("error", {
-                "code": exc.code,
-                "provider": exc.provider,
-                "detail": exc.detail[:300],
-            })
-            return
-        except Exception as exc:  # noqa: BLE001
-            yield sse("error", {"code": "server_error", "detail": f"{type(exc).__name__}: {exc}"[:300]})
-            return
+                    except llm.LLMError as exc:
+                        # A local model that cannot take tools is not a failed
+                        # turn: answer the same question without them.
+                        if (tools_this_turn and not emitted and which == llm.OLLAMA
+                                and "support" in exc.detail.lower() and "tool" in exc.detail.lower()):
+                            tools_this_turn = False
+                            yield sse("route", {"mode": decision["mode"], "provider": which,
+                                                "model": chosen, "reason": "this local model "
+                                                "cannot use tools; answering without them",
+                                                "skipped": []})
+                            continue
+                        raise
+                break
+            except toolchat.ToolChatError as exc:
+                yield sse("error", {"code": "tool_error", "detail": str(exc)[:300]})
+                return
+            except llm.LLMError as exc:
+                last = index == len(candidates) - 1
+                if emitted or last:
+                    # The code is a stable token the interface translates; the
+                    # detail is the provider's own words.
+                    yield sse("error", {"code": exc.code, "provider": exc.provider,
+                                        "detail": exc.detail[:300]})
+                    return
+                nxt = candidates[index + 1]
+                yield sse("route", {
+                    "mode": decision["mode"], "provider": nxt["provider"], "model": nxt["model"],
+                    "fallback": True, "from": which, "error": exc.code,
+                    "reason": f"{llm.LABELS.get(which, which)} failed ({exc.code}): "
+                              f"{exc.detail[:120]} — {nxt['reason']}",
+                    "skipped": [],
+                })
+                continue
+            except Exception as exc:  # noqa: BLE001
+                yield sse("error", {"code": "server_error", "detail": f"{type(exc).__name__}: {exc}"[:300]})
+                return
+
         text = "".join(parts).strip()
         if text:
             conversations.append(conv_id, "assistant", text, language=lang)
@@ -634,11 +881,13 @@ def post_chat(req: Request) -> Response:
         except Exception:  # noqa: BLE001 - highlighting must never break a reply
             pass
         # The timings go to the interface so a slow turn can be told apart
-        # from a slow model: a large ms_first_token with a small ms_total
-        # means the model was thinking, the other way round means JARVIS was.
+        # from a slow model.
         yield sse("done", {
             "conversation_id": conv_id,
             "text": text,
+            "provider": answered_by["provider"],
+            "model": answered_by["model"],
+            "usd": round(spent, 6),
             "ms_first_token": int(first_token * 1000) if first_token is not None else None,
             "ms_total": int((time.time() - started) * 1000),
             "chars": len(text),
@@ -796,6 +1045,17 @@ def get_workspace_file(req: Request) -> Response:
         return Response(workspace.read(req.q("path")))
     except workspace.WorkspaceError as exc:
         raise HttpError(400, str(exc)) from exc
+
+
+@router.get("/api/workspace/media")
+def get_workspace_media(req: Request) -> Response:
+    """A saved image, video or audio file, for the chat to show."""
+    try:
+        data, mime = media.read(req.q("path") or "")
+    except workspace.WorkspaceError as exc:
+        raise HttpError(400, str(exc)) from exc
+    return Response(data, content_type=mime, headers={"X-Content-Type-Options": "nosniff",
+                                                      "Cache-Control": "private, max-age=3600"})
 
 
 @router.post("/api/workspace/file")

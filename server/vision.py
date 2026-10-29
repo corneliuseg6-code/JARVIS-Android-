@@ -42,7 +42,7 @@ def status() -> dict[str, Any]:
         "local_only": bool(cfg.get("vision_local_only", True)),
         "save_captures": bool(cfg.get("save_captures")),
         # On a paid provider, sending a frame costs money — say so plainly.
-        "billed": provider == llm.OPENAI,
+        "billed": provider in llm.BILLED,
         "note": note,
     }
 
@@ -80,7 +80,7 @@ def describe(image_data_url: str, language: str = "en", prompt: str = "") -> dic
         }
     ]
     try:
-        text = llm.chat_once(messages, model=info["model"], timeout=180.0)
+        text = llm.chat_once(messages, model=info["model"], timeout=180.0, purpose="vision")
     except llm.LLMError as exc:
         return {"ok": False, "error": exc.code, "provider": exc.provider, "detail": exc.detail[:300]}
     return {"ok": True, "text": text.strip(), "provider": info["provider"]}

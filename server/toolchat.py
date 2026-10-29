@@ -107,12 +107,46 @@ def catalogue() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
                 "parameters": schema,
             },
         })
+        billed = bool(tool.get("billed"))
         lookup[exposed] = {
             "connection_id": conn_id,
             "tool": real,
-            "writes": is_mutating(real, tool.get("annotations")),
+            "connection": str(tool.get("connection_name") or ""),
+            # A connection that spends money or credits (OpenArt) holds every
+            # call for approval unless its name is plainly a read — and the
+            # server's own readOnlyHint is not enough to waive that.
+            "billed": billed,
+            "writes": is_mutating(real, None if billed else tool.get("annotations")),
         }
+    for exposed, spec in _builtins().items():
+        definitions.append({
+            "type": "function",
+            "function": {"name": exposed, "description": spec["description"],
+                         "parameters": spec["parameters"]},
+        })
+        lookup[exposed] = {"connection_id": "jarvis", "tool": exposed, "builtin": True,
+                           "billed": False, "writes": False, "connection": "JARVIS"}
     return definitions, lookup
+
+
+def _builtins() -> dict[str, dict[str, Any]]:
+    """
+    Tools JARVIS itself provides, offered only while they can work.
+
+    Claude Code's tool *proposes* a coding task; it never runs one. The run
+    waits in AI Connections for the user to read the exact command and
+    approve it, so the model calling this tool spends nothing and changes
+    nothing.
+    """
+    from . import claude_code  # local: claude_code is heavier and optional
+
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        if claude_code.ready_cached():
+            out["jarvis__claude_code"] = claude_code.TOOL_SPEC
+    except Exception:  # noqa: BLE001 - a broken optional tool must not break chat
+        pass
+    return out
 
 
 def is_mutating(tool_name: str, annotations: dict[str, Any] | None = None) -> bool:
@@ -206,11 +240,14 @@ def _sweep() -> None:
             _PENDING.pop(key, None)
 
 
-def propose(conn_id: str, tool: str, arguments: dict[str, Any], *, conversation_id: str = "") -> dict[str, Any]:
-    """Record a mutating call awaiting approval. Nothing runs."""
+def propose(conn_id: str, tool: str, arguments: dict[str, Any], *, conversation_id: str = "",
+            billed: bool = False, connection: str = "") -> dict[str, Any]:
+    """Record a held call awaiting approval. Nothing runs."""
     with _LOCK:
         _sweep()
         record = {
+            "billed": billed,
+            "connection": connection,
             "id": uuid.uuid4().hex[:12],
             "created": time.time(),
             "conversation_id": conversation_id,
@@ -296,6 +333,14 @@ def _as_text(result: Any) -> str:
                 continue
             if block.get("type") == "text" and block.get("text") is not None:
                 parts.append(str(block["text"]))
+            elif block.get("type") in ("image", "audio", "video") and block.get("data"):
+                # Megabytes of base64 help no model; the file is saved and its
+                # path appended by execute().
+                parts.append(f"[{block['type']} returned: {block.get('mimeType', '?')}]")
+            elif block.get("type") == "resource_link" or (
+                    block.get("type") == "resource" and isinstance(block.get("resource"), dict)):
+                res = block.get("resource") if block.get("type") == "resource" else block
+                parts.append(f"[{block['type']}: {res.get('uri', '')} {res.get('mimeType', '')}]".strip())
             else:
                 parts.append(json.dumps(block, ensure_ascii=False))
         if result.get("isError"):
@@ -317,17 +362,43 @@ def execute(entry: dict[str, Any], arguments: dict[str, Any], *, conversation_id
     conn_id = entry["connection_id"]
     tool = entry["tool"]
 
-    if entry["writes"] and not _take_approval(conn_id, tool, arguments):
-        if not writes_allowed():
-            record = propose(conn_id, tool, arguments, conversation_id=conversation_id)
+    if entry.get("builtin"):
+        from . import claude_code
+
+        started = time.time()
+        try:
+            record = claude_code.propose_from_tool(arguments)
+        except claude_code.CodeError as exc:
+            return {"ran": False, "error": exc.detail, "ms": 0,
+                    "text": f"ERROR: the coding task was not queued — {exc.detail}"}
+        return {
+            "ran": True,
+            "ms": int((time.time() - started) * 1000),
+            "code_request": record,
+            "text": (
+                f"QUEUED, NOT RUN: Claude Code request {record['id']} ({record['mode']} mode) "
+                f"is waiting for the user's approval in AI Connections → Claude Code. "
+                "Nothing has been changed yet. Tell the user it is waiting for them, "
+                "and do not describe any result."
+            ),
+        }
+
+    held = entry["writes"] or entry.get("billed")
+    if held and not _take_approval(conn_id, tool, arguments):
+        if entry.get("billed") or not writes_allowed():
+            record = propose(conn_id, tool, arguments, conversation_id=conversation_id,
+                             billed=bool(entry.get("billed")),
+                             connection=entry.get("connection", ""))
+            why = ("may spend credits on the user's account" if entry.get("billed")
+                   else "modifies data")
             return {
                 "ran": False,
                 "needs_approval": True,
                 "pending": record,
                 "text": (
-                    f"REFUSED: `{tool}` modifies data and has not been approved. "
-                    "It was NOT run. Ask the user to approve it, and do not "
-                    "describe its effect as having happened."
+                    f"REFUSED: `{tool}` {why} and has not been approved. "
+                    "It was NOT run. The user can approve and run it from the card "
+                    "in the chat. Do not describe its effect as having happened."
                 ),
             }
 
@@ -350,10 +421,20 @@ def execute(entry: dict[str, Any], arguments: dict[str, Any], *, conversation_id
     # success, and a card that says "ran in 240ms" over an error message
     # invites the model and the user to believe something happened.
     failed = isinstance(result, dict) and bool(result.get("isError"))
+    media: list[dict[str, Any]] = []
+    if not failed:
+        try:
+            from . import media as media_store
+            media = media_store.keep(result, tool=tool, connection=entry.get("connection", ""))
+        except Exception:  # noqa: BLE001 - saving a copy must never hide the result
+            media = []
+    if media:
+        text += "\n" + "\n".join(f"[saved to workspace: {m['path']}]" for m in media)
     return {
         "ran": not failed,
         "ms": elapsed,
         "text": text,
+        **({"media": media} if media else {}),
         **({"error": text[:300]} if failed else {}),
     }
 
@@ -363,7 +444,32 @@ def execute(entry: dict[str, Any], arguments: dict[str, Any], *, conversation_id
 # --------------------------------------------------------------------------
 
 def available() -> bool:
-    return bool(armory.all_tools())
+    return bool(armory.all_tools()) or bool(_builtins())
+
+
+def run_approved(pending_id: str) -> dict[str, Any]:
+    """
+    Run one approved call now, from its card, instead of asking the model to
+    try again. The approval is consumed exactly as a model-driven call would
+    consume it, so the same rules hold: one approval, one run, same arguments.
+    """
+    with _LOCK:
+        _sweep()
+        record = _PENDING.get(pending_id)
+        if record is None:
+            raise ToolChatError("that request has expired or never existed")
+        if record["used"]:
+            raise ToolChatError("that request has already run")
+        record["approved"] = True
+        conn_id, tool, arguments = record["connection_id"], record["tool"], record["arguments"]
+    entry = {
+        "connection_id": conn_id, "tool": tool, "writes": True,
+        "billed": record.get("billed", False), "connection": record.get("connection", ""),
+    }
+    outcome = execute(entry, arguments, conversation_id=record.get("conversation_id", ""))
+    with _LOCK:
+        _PENDING.pop(pending_id, None)
+    return {"id": pending_id, "tool": tool, **{k: v for k, v in outcome.items() if k != "pending"}}
 
 
 def _parse_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -383,7 +489,7 @@ def _parse_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
                 args = {}
         if not isinstance(args, dict):
             args = {}
-        calls.append({"id": raw.get("id") or "", "name": name, "arguments": args})
+        calls.append({"id": raw.get("id") or f"call_{len(calls)}", "name": name, "arguments": args})
     return calls
 
 
@@ -393,6 +499,7 @@ def run(
     model: str,
     conversation_id: str = "",
     timeout: float = 300.0,
+    which: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """
     Drive the conversation with tools, yielding events for the SSE layer.
@@ -418,12 +525,14 @@ def run(
         reply: dict[str, Any] = {}
         streamed = False
         for event in llm.chat_stream_full(work, model=model, tools=definitions,
-                                          timeout=timeout):
+                                          timeout=timeout, which=which):
             if event["type"] == "token":
                 streamed = True
                 yield {"type": "token", "text": event["text"]}
-            else:
+            elif event["type"] == "message":
                 reply = event["message"]
+                if event.get("cost"):
+                    yield {"type": "cost", **event["cost"]}
 
         calls = _parse_calls(reply)
         content = (reply.get("content") or "").strip()
@@ -438,18 +547,22 @@ def run(
 
         # Keep the assistant's own turn in the transcript, or the tool
         # messages that follow have nothing to attach to.
-        work.append({
+        turn = {
             "role": "assistant",
             "content": content,
             "tool_calls": reply.get("tool_calls") or [],
-        })
+        }
+        if reply.get("_native"):
+            turn["_native"] = reply["_native"]
+        work.append(turn)
 
         for call in calls:
             entry = lookup.get(call["name"])
             if entry is None:
                 text = f"ERROR: there is no tool called {call['name']}."
                 yield {"type": "tool_result", "name": call["name"], "ran": False, "text": text}
-                work.append({"role": "tool", "content": text, "name": call["name"]})
+                work.append({"role": "tool", "content": text, "name": call["name"],
+                             "tool_call_id": call["id"], "is_error": True})
                 continue
 
             yield {
@@ -471,17 +584,26 @@ def run(
             }
             if outcome.get("ms") is not None:
                 event["ms"] = outcome.get("ms")
+            if outcome.get("media"):
+                event["media"] = outcome["media"]
+            if outcome.get("code_request"):
+                event["code_request"] = outcome["code_request"]
+                yield {"type": "code_request", "request": outcome["code_request"]}
             if outcome.get("needs_approval"):
                 event["needs_approval"] = True
                 event["pending"] = outcome["pending"]
                 yield {"type": "tool_approval", "pending": outcome["pending"],
-                       "tool": entry["tool"], "arguments": call["arguments"]}
+                       "tool": entry["tool"], "arguments": call["arguments"],
+                       "billed": bool(entry.get("billed")),
+                       "connection": entry.get("connection", "")}
             yield event
 
             work.append({
                 "role": "tool",
                 "content": outcome["text"][:8000],
                 "name": call["name"],
+                "tool_call_id": call["id"],
+                "is_error": not outcome["ran"],
             })
 
     yield {

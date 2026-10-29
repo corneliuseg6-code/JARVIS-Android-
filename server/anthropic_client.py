@@ -363,3 +363,213 @@ def price_of(model: str) -> dict[str, float] | None:
     if not pair:
         return None
     return {"input": pair[0], "output": pair[1]}
+
+
+# --------------------------------------------------------------------------
+# tools + usage (V4)
+# --------------------------------------------------------------------------
+
+def _tools(definitions: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """OpenAI-shaped function definitions → Messages API tool definitions."""
+    out = []
+    for d in definitions or []:
+        fn = d.get("function") or {}
+        schema = fn.get("parameters") or {"type": "object", "properties": {}}
+        if schema.get("type") != "object":
+            schema = {"type": "object", "properties": {}}
+        out.append({
+            "name": fn.get("name", "tool"),
+            "description": str(fn.get("description") or "")[:900],
+            "input_schema": schema,
+        })
+    return out
+
+
+def _to_anthropic_full(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    """
+    _to_anthropic plus the tool loop's turns.
+
+    An assistant turn that called tools is replayed from the content blocks
+    Claude actually returned — thinking blocks with their signatures
+    included, unchanged, which the API requires when a tool result follows.
+    Tool results become `tool_result` blocks in a user turn; consecutive ones
+    land in the same turn through the merge in _to_anthropic.
+    """
+    rewritten: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "tool":
+            block = {
+                "type": "tool_result",
+                "tool_use_id": str(message.get("tool_call_id") or ""),
+                "content": str(message.get("content") or "") or "(empty)",
+            }
+            if message.get("is_error"):
+                block["is_error"] = True
+            rewritten.append({"role": "user", "_blocks": [block]})
+        elif role == "assistant" and message.get("tool_calls"):
+            native = message.get("_native") or {}
+            if native.get("provider") == "claude" and native.get("blocks"):
+                blocks = [dict(b) for b in native["blocks"]]
+            else:
+                blocks = []
+                if message.get("content"):
+                    blocks.append({"type": "text", "text": message["content"]})
+                for index, call in enumerate(message["tool_calls"]):
+                    fn = call.get("function") or {}
+                    args = fn.get("arguments")
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                    blocks.append({"type": "tool_use", "id": str(call.get("id") or f"toolu_{index}"),
+                                   "name": fn.get("name", ""), "input": args or {}})
+            rewritten.append({"role": "assistant", "_blocks": blocks})
+        else:
+            rewritten.append(message)
+
+    system_parts: list[str] = []
+    turns: list[dict[str, Any]] = []
+    for message in rewritten:
+        if "_blocks" in message:
+            content: Any = message["_blocks"]
+            role = message["role"]
+            if turns and turns[-1]["role"] == role:
+                turns[-1] = _merge_turn(turns[-1], content)
+            else:
+                turns.append({"role": role, "content": content})
+            continue
+        role = message.get("role", "user")
+        text = message.get("content") or ""
+        if role == "system":
+            if text:
+                system_parts.append(text)
+            continue
+        if role not in ("user", "assistant"):
+            role = "user"
+        images = message.get("images") or []
+        content = [
+            *({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": raw}}
+              for raw in images),
+            *([{"type": "text", "text": text}] if text else []),
+        ] if images else text
+        if not content:
+            continue
+        if turns and turns[-1]["role"] == role:
+            turns[-1] = _merge_turn(turns[-1], content)
+        else:
+            turns.append({"role": role, "content": content})
+    while turns and turns[0]["role"] != "user":
+        turns.pop(0)
+    return "\n\n".join(system_parts), turns
+
+
+def chat_stream_full(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    max_tokens: int | None = None,
+    timeout: float = 300.0,
+    effort: str | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Stream a turn; yield tokens, then the assembled message and usage."""
+    system, turns = _to_anthropic_full(messages)
+    payload: dict[str, Any] = {
+        "model": model,
+        "max_tokens": int(max_tokens or MAX_TOKENS),
+        "messages": turns,
+        "stream": True,
+    }
+    if system:
+        payload["system"] = system
+    declared = _tools(tools)
+    if declared:
+        payload["tools"] = declared
+    chosen = (effort or config.get_config().get("claude_effort") or "").strip().lower()
+    if chosen in EFFORTS:
+        payload["output_config"] = {"effort": chosen}
+
+    blocks: dict[int, dict[str, Any]] = {}
+    partial: dict[int, str] = {}
+    usage = {"input": 0, "output": 0}
+    stop = ""
+    seen_tool = False
+
+    response = _request("/v1/messages", payload, timeout=timeout, stream=True)
+    with response:
+        for raw in response:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            try:
+                event = json.loads(line[5:].strip())
+            except json.JSONDecodeError:
+                continue
+            kind = event.get("type")
+            if kind == "message_start":
+                u = (event.get("message") or {}).get("usage") or {}
+                # Cache reads and writes are input too, at their own rates; the
+                # ledger prices them as plain input, which can only over-state.
+                usage["input"] = int(u.get("input_tokens") or 0) + \
+                    int(u.get("cache_creation_input_tokens") or 0) + \
+                    int(u.get("cache_read_input_tokens") or 0)
+                usage["output"] = int(u.get("output_tokens") or 0)
+            elif kind == "content_block_start":
+                index = int(event.get("index") or 0)
+                block = dict(event.get("content_block") or {})
+                if block.get("type") == "tool_use":
+                    block["input"] = {}
+                    partial[index] = ""
+                    seen_tool = True
+                blocks[index] = block
+            elif kind == "content_block_delta":
+                index = int(event.get("index") or 0)
+                delta = event.get("delta") or {}
+                block = blocks.setdefault(index, {"type": "text", "text": ""})
+                dtype = delta.get("type")
+                if dtype == "text_delta":
+                    piece = delta.get("text") or ""
+                    block["text"] = (block.get("text") or "") + piece
+                    if piece and not seen_tool:
+                        yield {"type": "token", "text": piece}
+                elif dtype == "thinking_delta":
+                    block["thinking"] = (block.get("thinking") or "") + (delta.get("thinking") or "")
+                elif dtype == "signature_delta":
+                    block["signature"] = (block.get("signature") or "") + (delta.get("signature") or "")
+                elif dtype == "input_json_delta":
+                    partial[index] = partial.get(index, "") + (delta.get("partial_json") or "")
+            elif kind == "content_block_stop":
+                index = int(event.get("index") or 0)
+                if index in partial:
+                    try:
+                        blocks[index]["input"] = json.loads(partial.pop(index) or "{}")
+                    except json.JSONDecodeError:
+                        blocks[index]["input"] = {}
+            elif kind == "message_delta":
+                stop = (event.get("delta") or {}).get("stop_reason") or stop
+                u = event.get("usage") or {}
+                if u.get("output_tokens") is not None:
+                    usage["output"] = int(u["output_tokens"])
+            elif kind == "message_stop":
+                break
+            elif kind == "error":
+                error = event.get("error") or {}
+                raise AnthropicError("stream_error",
+                                     str(error.get("message") or "The stream failed.")[:300])
+
+    ordered = [blocks[i] for i in sorted(blocks)]
+    text = "".join(b.get("text") or "" for b in ordered if b.get("type") == "text")
+    if stop == "refusal" and not text:
+        raise AnthropicError("refusal", "Claude declined this request.")
+    message: dict[str, Any] = {"role": "assistant", "content": text}
+    calls = [
+        {"id": b.get("id", ""), "type": "function",
+         "function": {"name": b.get("name", ""), "arguments": b.get("input") or {}}}
+        for b in ordered if b.get("type") == "tool_use"
+    ]
+    if calls:
+        message["tool_calls"] = calls
+        message["_native"] = {"provider": "claude", "blocks": ordered}
+    yield {"type": "message", "message": message, "usage": usage, "stop": stop}
