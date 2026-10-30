@@ -176,4 +176,9 @@ Add a line whenever a correction is confirmed (by the user or by a test).
 - In this container's headless Chromium, `Input.synthesizeScrollGesture`
   does not scroll even a plain div. Use `Input.dispatchTouchEvent` for real
   touch scrolling.
+- The chat panel is anchored to the input bar (`margin-top: auto`). A panel
+  anchored to the top shrinks the wrong way when dragged. Never re-centre
+  the console when the panel folds: the rings must not move.
+- Measure gestures *mid-drag* (finger still down), not only after release.
+  The wrong-direction bug was invisible in the released states.
 

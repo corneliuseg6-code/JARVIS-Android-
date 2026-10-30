@@ -5,6 +5,25 @@ the result was observed.
 
 ---
 
+## V4 Phase 2f — chat panel dragging
+
+- **Not tested on the phone.** The grip was dragged with real touch input in
+  Chromium, measured mid-drag and after release. The grip has
+  `touch-action: none`, so Android hands it the whole gesture just as the
+  test does, but the real device was not available.
+- **The panel is not taller than before when open.** It still starts right
+  under the RINGS/FACE bar. Starting it higher, as in the reference mock-up,
+  would mean covering that bar or moving or shrinking the console, which
+  the request ruled out.
+- **The rest of the reference mock-up was not applied:** a smaller avatar,
+  rings moved up, buttons re-ordered, and the panel wrapping around the
+  right rail. Those are layout changes that need a separate decision.
+- **Folding no longer re-centres the console.** The freed space shows the
+  backdrop under it, which is the requested behaviour; it replaces the
+  centring added in Phase 1f.
+
+---
+
 ## V4 Phase 2e — chat scrolling
 
 - **Not tested on the phone.** Touch was emulated in Chromium with real

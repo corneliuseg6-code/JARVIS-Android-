@@ -59,7 +59,7 @@ git checkout claude/v4-agent-system && git pull
 
 **After any update, the installed PWA must be closed completely** (not just
 backgrounded) or it keeps serving the old cached shell. The service-worker
-cache name is bumped every release — currently `jarvis-v4-12-scrollfix` in
+cache name is bumped every release — currently `jarvis-v4-13-dragfix` in
 `web/sw.js`. Bump it whenever `web/` changes.
 
 ---
@@ -202,7 +202,8 @@ Browser suites are Playwright scripts in the scratchpad, not in the repo —
    credit approval. Setup: SETUP-V4-BRAIN.md. What is and is not verified:
    LIMITATIONS.md, "V4 Phase 2".
    Scrolling the chat no longer folds the panel or moves the console; only
-   the grip folds it.
+   the grip folds it. The panel is anchored to the input bar: dragging the
+   grip moves its top edge, and the console never re-centres.
    MCP tool turns always end in an answer or an explicit error (loop guard,
    final answer round, fallback to the tool's result, lenient tool names,
    built-in `jarvis__workspace_list`, `num_ctx` 4096 on Ollama tool turns).

@@ -2,6 +2,59 @@
 
 ---
 
+# V4 Phase 2f — the chat panel slides the right way, and only the panel moves
+
+Reported from the phone (three screenshots, current build): dragging the
+chat panel's grip moved it the wrong way and pulled the interface with it.
+A follow-up message asked for the gap to go and for the panel to stay
+joined to the input bar, with Chat and Folders in one panel, sliding on its
+own.
+
+**Causes** (`web/css/jarvis.css`):
+
+1. **The panel was anchored to the top of its column.** The column under
+   the top bar is a flex column with the panel placed straight after the
+   console. Dragging the grip down lowers the panel's height, so the panel
+   shrank toward its top edge: its bottom rose (863 → 743 px) and a gap
+   opened above the input bar, while the top edge never moved.
+2. **Folding re-centred the console.** The rule
+   `.app[data-chat="collapsed"] .workspace { justify-content: center }`
+   moved the dial from y=103 to y=290, taking the rings, avatar and HUD
+   with it.
+
+**Fix**, CSS only:
+
+- `.chat-panel { margin-top: auto }` anchors the panel to the input bar.
+  When it is shorter than its space, the free space opens *above* it, so
+  its top edge follows the finger down and reveals the area under the rings.
+  Dragging up grows it from the input bar.
+- The re-centring rule (and its transition) is removed, so the console
+  never moves.
+- The drag code was already correct and is unchanged.
+- The open layout is pixel-identical to before. Service-worker cache:
+  `jarvis-v4-13-dragfix`.
+
+**Verified** with real touch input in Chromium at 412×915 and 360×800,
+18 checks each. The previous commit fails 7 of them, reproducing the
+screenshots.
+
+- **Mid-drag down:** the panel's top edge moves 471 → 591 with the finger,
+  its bottom stays on the input bar, and the console doesn't move.
+- **Folded:** the grip rests on the input bar. The console and the input
+  bar are unchanged.
+- **Mid-drag up:** the panel grows from the input bar; released, it is back
+  at exactly its original size.
+- **Unchanged behaviour:** a short wobble does nothing, tapping the grip
+  folds and unfolds it, and the FOLDERS tab works.
+- **No page scroll:** swipes on the console, top bar and input bar never
+  scroll the page.
+- **Keyboard (viewport shrunk):** the input bar sits at the bottom and
+  stays focused, and everything returns exactly afterwards.
+- **Regressions:** the chat scroll suite (18), the AI Tools menu (45), the
+  flow (33) and all test suites pass, and the home geometry is identical.
+
+---
+
 # V4 Phase 2e — scrolling the chat no longer moves the interface
 
 Reported from the phone with two screenshots: scrolling in the chat moved

@@ -493,6 +493,13 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
    The dock is a sibling of the workspace, not a child of this panel, so the
    input bar and Send stay exactly where they are whatever this does. */
 .chat-panel {
+  /* Anchored to the bottom of the workspace, just above the input bar. When
+     the panel is shorter than the space it has (while dragging the grip, or
+     folded), the free space opens ABOVE it: its top edge follows the finger
+     down and the area under the rings is revealed, while the console above
+     stays exactly where it is. Anchored to the top instead, a drag down
+     shrank the panel upward and opened a gap above the input bar. */
+  margin-top: auto;
   /* A concrete ceiling, because a transition cannot animate out of `none`.
      Far taller than any phone, so it never clips an expanded panel. */
   max-height: 2000px;
@@ -531,17 +538,16 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-chat="collapsed"] .chat-grip-bar { width: 58px; background: var(--teal-soft); }
 .chat-head, .messages { transition: opacity .18s ease; }
 
-/* With the conversation out of the way, centre what is left rather than
-   leaving the dial pinned to the top above empty space. */
-.workspace { transition: justify-content .3s ease; }
-.app[data-chat="collapsed"] .workspace { justify-content: center; }
+/* The console does not move when the conversation folds: the rings, the
+   avatar and the rails stay put and the freed space shows the backdrop.
+   (Re-centring the console here made the whole interface jump.) */
 
 /* While a finger is on the grip, follow it exactly — no transition fighting
    the drag. The class is removed on release so the snap animates. */
 .chat-panel.is-dragging { transition: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-panel, .workspace, .chat-head, .messages { transition: none; }
+  .chat-panel, .chat-head, .messages { transition: none; }
 }
 
 .chat-head { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
