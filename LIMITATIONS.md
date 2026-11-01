@@ -5,6 +5,20 @@ the result was observed.
 
 ---
 
+## V4 Phase 2g — clock and RINGS/FACE moved
+
+- **Not checked on the phone.** Measured in Chromium at 412×915 and
+  360×800. The real device's font rendering could make the clock text
+  slightly wider; at 412 px it has about 10 px to spare in the rail.
+- **Two side effects of the move:**
+  - the MUTE…REFLEX column sits 34 px lower;
+  - the chat panel gains 27 px.
+
+  Keeping the panel where it was would have left an empty strip where the
+  RINGS/FACE bar used to be.
+
+---
+
 ## V4 Phase 2f — chat panel dragging
 
 - **Not tested on the phone.** The grip was dragged with real touch input in

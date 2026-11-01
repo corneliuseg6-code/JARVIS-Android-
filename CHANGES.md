@@ -2,6 +2,53 @@
 
 ---
 
+# V4 Phase 2g — clock under the avatar, RINGS/FACE under the rings
+
+Requested from the phone, in three steps:
+
+1. Move the clock and date directly below the avatar, above MUTE.
+2. Move RINGS/FACE up into the clock's old place, centred under the rings.
+3. Size both so nothing overlaps, and change nothing else.
+
+**Change**, CSS only (`web/css/jarvis.css`). No HTML or JS changes.
+
+- The console grid now has three rows set by the right column:
+  hologram / clock / control rail.
+- **Clock:** column 3, row 2, in a fixed 30 px slot (`--clock-h`).
+- **RINGS/FACE:** column 2, at the bottom of the band, centred between the
+  dial and the band's bottom edge. It is as wide as the clear span between
+  the rails (207 px at 412 px wide), because the control rail now runs down
+  beside it. Its labels still fit.
+- **The rings and the left status rail are pinned in place.** A new
+  `--band-h` (hologram + 4 px + rail) keeps them at exactly their old
+  coordinates, although the right column grew by the clock's height.
+- **Keyboard and short screens:** the control rail stays in row 3 when the
+  hologram hides.
+- **Immersive mode:** the stage resets its new margin.
+- Service-worker cache: `jarvis-v4-14-clock`.
+
+**Measured** at 412×915 and 360×800, against the previous commit:
+
+| Element | At 412×915 |
+|---|---|
+| Rings (dial) | unchanged: 275×275 at (54,103) |
+| Avatar | unchanged |
+| Left status chips | unchanged (pixel-identical) |
+| Clock | under the avatar, 4 px clear of it and of MUTE; time and date fit the rail |
+| RINGS/FACE | 16 px under the dial, exactly centred, clear of both rails |
+| MUTE…REFLEX | 34 px lower (the clock's slot) |
+| Chat panel | starts 27 px higher (471 → 444), gaining the RINGS/FACE bar's old row |
+| Input bar | unchanged |
+
+- No overlaps between any two controls at either size.
+- No page scroll and no JS errors.
+- With the keyboard up, and in immersive mode, the layout holds.
+- The chat drag (18 × 2 sizes), scroll (18), AI Tools menu (45) and flow
+  (33) suites pass. Only the RINGS/FACE invariant was updated, to its new
+  requested geometry. All test suites pass.
+
+---
+
 # V4 Phase 2f — the chat panel slides the right way, and only the panel moves
 
 Reported from the phone (three screenshots, current build): dragging the

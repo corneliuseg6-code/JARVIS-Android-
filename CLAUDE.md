@@ -99,7 +99,8 @@ Browser checks use Playwright (pre-installed in the cloud container), at
 `tools/mock_cloud.py`. Assert these invariants:
 
 - dial `#stage` is 275×275 at (54,103);
-- `#avatar-switch` is 275 px wide;
+- `#avatar-switch` (RINGS/FACE) is 207×28 at (88,394), centred under the
+  dial; the clock sits under the avatar, above MUTE;
 - four shortcuts;
 - `scrollHeight ≤ 915` and `scrollWidth ≤ 412`;
 - the status pill is not truncated;
@@ -181,4 +182,7 @@ Add a line whenever a correction is confirmed (by the user or by a test).
   the console when the panel folds: the rings must not move.
 - Measure gestures *mid-drag* (finger still down), not only after release.
   The wrong-direction bug was invisible in the released states.
+- When moving console items, pin what must not move with explicit offsets
+  (`--band-h`) instead of trusting grid centring: adding a row to one column
+  silently re-centres every element spanning it.
 

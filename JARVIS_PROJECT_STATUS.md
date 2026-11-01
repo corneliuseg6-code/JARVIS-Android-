@@ -59,7 +59,7 @@ git checkout claude/v4-agent-system && git pull
 
 **After any update, the installed PWA must be closed completely** (not just
 backgrounded) or it keeps serving the old cached shell. The service-worker
-cache name is bumped every release — currently `jarvis-v4-13-dragfix` in
+cache name is bumped every release — currently `jarvis-v4-14-clock` in
 `web/sw.js`. Bump it whenever `web/` changes.
 
 ---
@@ -116,8 +116,9 @@ tools/            MCP servers and the test suites
 - **Chromium shrink-to-fits a fixed box** that carries a self-alignment other
   than `stretch` — this is why `.stage` uses `place-self: stretch` in
   immersive mode.
-- The layout invariants every browser test re-checks: dial **275 px**, the
-  RINGS/FACE bar the same width as the dial, four shortcuts, and
+- The layout invariants every browser test re-checks: dial **275 px** at
+  (54,103), the RINGS/FACE bar centred under it (207 px at 412 px wide),
+  four shortcuts, and
   `scrollHeight <= 916` (the page must never scroll).
 - The top bar's first line is full at 412 px: the AI ☰ button fits only
   because the full-screen label hides at ≤430 px. Adding anything else
@@ -201,6 +202,8 @@ Browser suites are Playwright scripts in the scratchpad, not in the repo —
    diff, revert, resume, chat proposal tool); OpenArt over MCP with OAuth and
    credit approval. Setup: SETUP-V4-BRAIN.md. What is and is not verified:
    LIMITATIONS.md, "V4 Phase 2".
+   The clock sits under the avatar (above MUTE); RINGS/FACE sits centred
+   under the rings, 207 px wide at 412 px.
    Scrolling the chat no longer folds the panel or moves the console; only
    the grip folds it. The panel is anchored to the input bar: dragging the
    grip moves its top edge, and the console never re-centres.
