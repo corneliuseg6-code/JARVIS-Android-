@@ -5,6 +5,21 @@ the result was observed.
 
 ---
 
+## V4 Phase 2h — live self-status
+
+- **What is verified:** the model is *given* the correct, live facts every
+  turn, and they follow reality (tested with Ollama up and down, paid and
+  local brains, a fallback, and MCP connected and disconnected).
+- **What a small model does with them is not verified.** A 1.5B model can
+  still misread or ignore a system message. That was not observable here
+  (no real Ollama model in the container), only on the phone. The block
+  states it overrides older claims, to counter wrong answers left in the
+  history.
+- The block adds about 700 characters to every turn. It is cheap, but on a
+  paid brain it is billed like any other input.
+
+---
+
 ## V4 Phase 2g — clock and RINGS/FACE moved
 
 - **Not checked on the phone.** Measured in Chromium at 412×915 and

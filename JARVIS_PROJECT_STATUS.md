@@ -137,7 +137,7 @@ python3 tools/test_toolcall.py      # 29
 python3 tools/test_websearch.py     # 88
 python3 tools/test_connections.py   # 44
 python3 tools/test_provider.py      # 35
-python3 tools/test_brain.py         # 127  → 455 checks with test_toolcall at 30, all passing
+python3 tools/test_brain.py         # 140  → 468 checks with test_toolcall at 30, all passing
 python3 tools/bench_chat.py         # latency against a fixed-rate stub
 ```
 
@@ -202,6 +202,9 @@ Browser suites are Playwright scripts in the scratchpad, not in the repo —
    diff, revert, resume, chat proposal tool); OpenArt over MCP with OAuth and
    credit approval. Setup: SETUP-V4-BRAIN.md. What is and is not verified:
    LIMITATIONS.md, "V4 Phase 2".
+   Every chat turn carries a LIVE SYSTEM STATUS block (server/runtime_status.py):
+   the brain answering, Ollama's real state and models, paid-brain gates,
+   connected MCP tools. /api/health probes Ollama for real.
    The clock sits under the avatar (above MUTE); RINGS/FACE sits centred
    under the rings, 207 px wide at 412 px.
    Scrolling the chat no longer folds the panel or moves the console; only

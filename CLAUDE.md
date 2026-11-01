@@ -24,6 +24,7 @@ server/   Python 3 standard library ONLY (Termux has no compiler for wheels)
   toolchat.py   MCP tool loop, approvals       armory.py   MCP connections
   mcp_client.py stdio + streamable HTTP        oauth.py    MCP sign-in (OAuth 2.1 + PKCE)
   claude_code.py Claude Code CLI bridge        media.py    tool media → workspace
+  runtime_status.py  the live status block every chat turn carries
   workspace.py, voices.py, config.py, paths.py, conversations.py, vision.py, store.py
 web/      plain ES modules, no bundler. js/app.js wires everything.
   js/ui/connections.js  AI Connections panel   js/ui/toolsmenu.js  AI TOOLS menu
@@ -185,4 +186,8 @@ Add a line whenever a correction is confirmed (by the user or by a test).
 - When moving console items, pin what must not move with explicit offsets
   (`--band-h`) instead of trusting grid centring: adding a row to one column
   silently re-centres every element spanning it.
+- The model knows nothing it is not told. Every chat turn carries the live
+  status block from `runtime_status.with_status()`, built per answering
+  candidate. Never hard-code a status (`/api/health` once reported Ollama
+  "disconnected / not in use" without asking).
 

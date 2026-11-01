@@ -50,7 +50,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import mock_cloud  # noqa: E402
 from server import (  # noqa: E402
     anthropic_client, api, armory, claude_code as cc, config, gemini_client, llm, media,
-    oauth, openai_client, paths, toolchat, usage,
+    oauth, openai_client, paths, runtime_status, toolchat, usage,
 )
 from server.app import Request  # noqa: E402
 
@@ -444,6 +444,85 @@ try:
     config.update_config({"ollama_num_ctx": 0})
     mock_cloud.STATE["ollama_small"] = set()
     armory.delete_connection(files["id"])
+
+    # ------------------------------------------------------------------
+    section("Self-awareness: the model is told its real, live status")
+    config.update_config({"routing_mode": "manual", "llm_provider": "ollama", "auto_fallback": True})
+    mock_cloud.STATE["ollama_small"] = set()
+    mock_cloud.STATE["ollama_down"] = False
+    runtime_status.invalidate()
+
+    def system_sent(service):
+        body = requests_for(service)[-1][2]
+        if service == "anthropic":
+            return str(body.get("system") or "")
+        msgs = body.get("messages") or []
+        return "\n".join(str(m.get("content")) for m in msgs if m.get("role") == "system")
+
+    mock_cloud.STATE["requests"].clear()
+    frames = chat("Is Ollama connected, and which model are you?")
+    sys_text = system_sent("ollama")
+    check("the system message carries a LIVE SYSTEM STATUS block", "LIVE SYSTEM STATUS" in sys_text)
+    check("…naming the brain really answering (Ollama llama3.2:3b)",
+          "answering as: Ollama model llama3.2:3b" in sys_text, sys_text[:160])
+    check("…with Ollama connected and its real installed models",
+          "Ollama: connected" in sys_text and "qwen2.5:1.5b" in sys_text)
+    check("…with the connected MCP server and its real tools",
+          "Echo (2 tools: echo, clock)" in sys_text, [l for l in sys_text.splitlines() if "MCP" in l])
+    check("…and the paid brains' real gates", "Claude ready" in sys_text and "Gemini" in sys_text)
+    check("…and it overrides older claims in the conversation", "overrides anything said earlier" in sys_text)
+
+    # A paid brain selected: /api/health used to report Ollama "disconnected /
+    # not in use" without asking. It must report what Ollama really is.
+    config.update_config({"llm_provider": "claude"})
+    runtime_status.invalidate()
+    health = json.loads(api.health(Request("GET", "/api/health", {}, {}, b"")).body)
+    check("/api/health probes Ollama for real while Claude is the brain",
+          health["ollama"]["state"] == "connected" and "llama3.2:3b" in health["ollama"]["models"]
+          and health["ollama"]["error"] != "not in use", health["ollama"])
+    mock_cloud.STATE["requests"].clear()
+    chat("which model are you?")
+    sys_text = system_sent("anthropic")
+    check("answering on Claude, the status says Claude (not Ollama) is answering",
+          "answering as: Claude model claude-opus-5-5 (paid API)" in sys_text, sys_text[:160])
+    check("…while still reporting Ollama as connected", "Ollama: connected" in sys_text)
+
+    # Not hardcoded: take Ollama down and the status follows.
+    mock_cloud.STATE["ollama_down"] = True
+    runtime_status.invalidate()
+    health = json.loads(api.health(Request("GET", "/api/health", {}, {}, b"")).body)
+    check("Ollama really down: /api/health says so", health["ollama"]["state"] != "connected", health["ollama"]["state"])
+    mock_cloud.STATE["requests"].clear()
+    chat("is Ollama running?")
+    sys_text = system_sent("anthropic")
+    check("…and the model is told Ollama is NOT reachable", "Ollama: NOT reachable" in sys_text)
+    mock_cloud.STATE["ollama_down"] = False
+
+    # Fallback: the status names the brain that finally answers.
+    config.update_config({"llm_provider": "claude"})
+    mock_cloud.STATE["fail"]["anthropic"] = (
+        400, {"type": "error", "error": {"type": "invalid_request_error",
+                                         "message": "Your credit balance is too low"}})
+    runtime_status.invalidate()
+    mock_cloud.STATE["requests"].clear()
+    frames = chat("which model are you?")
+    done = next((d for k, d in frames if k == "done"), {})
+    sys_text = system_sent("ollama")
+    check("after a fallback, the answering Ollama is told it is the one answering",
+          done.get("provider") == "ollama" and "answering as: Ollama model" in sys_text)
+    mock_cloud.STATE["fail"].clear()
+
+    armory.disconnect(echo_conn["id"])
+    runtime_status.invalidate()
+    config.update_config({"llm_provider": "ollama"})
+    mock_cloud.STATE["requests"].clear()
+    chat("what tools do you have?")
+    sys_text = system_sent("ollama")
+    check("a disconnected MCP server is reported as not connected, not as available",
+          "MCP servers connected: none" in sys_text and "configured but not connected: Echo" in sys_text,
+          [l for l in sys_text.splitlines() if "MCP" in l])
+    armory.connect(echo_conn["id"])
+    runtime_status.invalidate()
 
     # ------------------------------------------------------------------
     section("Keys never leave the backend")

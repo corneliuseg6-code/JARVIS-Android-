@@ -11,7 +11,8 @@ from typing import Any, Iterator
 
 from . import (
     anthropic_client, armory, claude_code, config, conversations, gemini_client, llm,
-    media, oauth, ollama, openai_client, paths, toolchat, usage, vision, voices, workspace,
+    media, oauth, ollama, openai_client, paths, runtime_status, toolchat, usage, vision, voices,
+    workspace,
 )
 
 #: Which secret store entry belongs to which provider. Keeping the mapping in
@@ -56,12 +57,11 @@ def health(req: Request) -> Response:
     # every twelve seconds to colour a chip nobody is looking at would be both
     # slow and, on a billed account, rude.
     brain = llm.health(timeout=6.0)
-    ollama_health = (
-        ollama.health(timeout=2.5)
-        if brain["provider"] == llm.OLLAMA
-        else {"state": "disconnected", "models": [], "url": brain.get("url", ""),
-              "error": "not in use"}
-    )
+    # Probed for real whichever brain is selected. This used to report
+    # "disconnected / not in use" whenever a paid brain was active — a
+    # constant, not a status — while Ollama was running fine. It is local
+    # and free to ask.
+    ollama_health = runtime_status.ollama_state()
     engine = voices.engine_info()
     chosen = voices.resolve_voice(
         cfg["conversation_language"], cfg.get("voice_override", ""),
@@ -86,9 +86,9 @@ def health(req: Request) -> Response:
                 "url": ollama_health["url"],
                 "models": ollama_health["models"],
                 "chat_model": cfg["chat_model"],
-                "chat_model_installed": (
-                    ollama.has_model(cfg["chat_model"])
-                    if brain["provider"] == llm.OLLAMA else False
+                "chat_model_installed": any(
+                    m == cfg["chat_model"] or m.split(":")[0] == cfg["chat_model"].split(":")[0]
+                    for m in ollama_health.get("models", [])
                 ),
                 "error": ollama_health.get("error", ""),
             },
@@ -858,19 +858,22 @@ def post_chat(req: Request) -> Response:
             if index == 0 and requested_model and which == llm.provider():
                 chosen = requested_model
             answered_by = {**cand, "model": chosen}
+            # The live status names the brain answering *this* attempt, so a
+            # fallback answer does not describe the brain that just failed.
+            turn_messages = runtime_status.with_status(messages, which, chosen)
             emitted = False
             tools_this_turn = use_tools and not (which == llm.OLLAMA and chosen in _NO_TOOL_MODELS)
             try:
                 while True:
                     try:
                         if tools_this_turn:
-                            source = toolchat.run(messages, model=chosen, conversation_id=conv_id,
+                            source = toolchat.run(turn_messages, model=chosen, conversation_id=conv_id,
                                                   which=which, language=lang)
                         else:
                             source = (
                                 {"type": "token", "text": e["text"]} if e["type"] == "token"
                                 else {"type": "cost", **(e.get("cost") or {})}
-                                for e in llm.chat_stream_full(messages, model=chosen, which=which)
+                                for e in llm.chat_stream_full(turn_messages, model=chosen, which=which)
                                 if e["type"] == "token" or e.get("cost")
                             )
                         for event in source:

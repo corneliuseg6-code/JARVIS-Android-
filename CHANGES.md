@@ -2,6 +2,63 @@
 
 ---
 
+# V4 Phase 2h — JARVIS knows its own real status
+
+Reported: JARVIS claimed Ollama was disconnected and that no AI model was
+active.
+
+## Causes
+
+1. **The model was never told its status.** Its system message was only
+   the persona and language line. Asked "is Ollama connected?" or "which
+   model are you?", a small local model guessed, and could repeat an old
+   error still in the conversation history.
+2. **A hard-coded status.** Whenever a paid brain was selected,
+   `/api/health` returned Ollama as `"disconnected"` with error
+   `"not in use"`, without asking Ollama. The interface's installed-model
+   list then came back empty.
+
+## Fix
+
+- **New `server/runtime_status.py`** builds a short `LIVE SYSTEM STATUS`
+  block from real checks. It says it overrides anything said earlier in
+  the conversation. It covers:
+  - the brain and model actually answering this turn;
+  - the routing mode;
+  - Ollama's live state, address and installed models (one local probe,
+    reused for 5 s);
+  - each paid brain's real gate state, from `llm.usable()`; nothing paid
+    is contacted;
+  - the MCP servers connected, with their tool names, and the ones
+    configured but not connected.
+- **`post_chat` adds the block to the system message per candidate**, so
+  after a fallback the brain that finally answers is the one named.
+- **`/api/health` probes Ollama for real** whichever brain is selected.
+  `chat_model_installed` is computed from the real model list.
+
+## Verified
+
+`test_brain.py`: 140 checks, 13 new. With the mock Ollama, a real stdio
+MCP server and the in-process chat endpoint, the tests check:
+
+- **Ollama answering:** the block names Ollama `llama3.2:3b`, says Ollama
+  is connected with its real installed models, and lists the connected MCP
+  server's real tools.
+- **Claude selected:** `/api/health` still reports Ollama connected, and
+  the block names Claude as the one answering.
+- **Ollama stopped:** `/api/health` and the block both say it is not
+  reachable, so the status is not hard-coded.
+- **After a Claude → Ollama fallback,** Ollama is told it is the one
+  answering.
+- **A disconnected MCP server** is reported as "configured but not
+  connected".
+
+All 7 suites pass (468 checks). Latency is unchanged (TTFT ≈ 0.35 s) and
+selftest is 71/71. The browser suites pass: AI Tools 45, flow 33, drag 18,
+scroll 18. There is no interface change.
+
+---
+
 # V4 Phase 2g — clock under the avatar, RINGS/FACE under the rings
 
 Requested from the phone, in three steps:

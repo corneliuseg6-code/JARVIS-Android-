@@ -148,7 +148,10 @@ class Handler(BaseHTTPRequestHandler):
                 {"name": "models/embedding-001", "supportedGenerationMethods": ["embedContent"]},
             ]})
         elif parsed.path == "/api/tags":
-            self._json(200, {"models": [{"name": "llama3.2:3b"}]})
+            if STATE.get("ollama_down"):
+                self._json(503, {"error": "ollama is not running"})
+            else:
+                self._json(200, {"models": [{"name": "llama3.2:3b"}, {"name": "qwen2.5:1.5b"}]})
         elif parsed.path.startswith("/.well-known/oauth-protected-resource"):
             base = f"http://{self.headers['Host']}"
             self._json(200, {"resource": base + "/mcp", "authorization_servers": [base],
