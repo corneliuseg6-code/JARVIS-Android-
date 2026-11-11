@@ -94,15 +94,6 @@
          TOOLS, VISION, one under the other. -->
     <div class="rail rail-left" id="status-chips" role="status" aria-live="polite"></div>
 
-    <!-- ============ clock, in the band above the dial ============
-         Column 2, top-aligned, so it shares the dial's axis and sits in the
-         space the band already had. It costs the rings nothing: they keep
-         their size and their position. -->
-    <div class="hud-clock" id="hud-clock" aria-hidden="true">
-      <span class="hud-time" id="hud-time">--:--:--</span>
-      <span class="hud-date" id="hud-date"></span>
-    </div>
-
     <!-- ============ 1. avatar / hologram, upper right ============
          Its own WebGL surface, so the face can be on screen at the same time
          as the rings rather than instead of them. -->
@@ -182,10 +173,17 @@
       </div>
     </main>
 
-    <!-- RINGS / FACE: its own row under the dial, exactly as wide, and clear
-         of both rails so nothing covers its ends. -->
+    <!-- ============ RINGS · clock · FACE, one row under the dial ============
+         The London clock in the middle with the two mode buttons either side
+         of it, on the dial's axis. One row instead of the old clock row plus
+         a separate RINGS/FACE bar, so the height that row took goes to the
+         conversation below. -->
     <div class="mode-row" id="avatar-switch" role="group" data-i18n-aria="avatar.mode">
       <button type="button" class="mode-btn is-active" data-mode="rings" data-i18n="avatar.rings">Rings</button>
+      <div class="hud-clock" id="hud-clock" aria-hidden="true">
+        <span class="hud-time" id="hud-time">--:--:--</span>
+        <span class="hud-date" id="hud-date"></span>
+      </div>
       <button type="button" class="mode-btn" data-mode="face" data-i18n="avatar.face">Face</button>
     </div>
   </section>

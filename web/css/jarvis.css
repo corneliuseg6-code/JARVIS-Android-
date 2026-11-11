@@ -214,11 +214,12 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   position: relative;
   display: grid;
   grid-template-columns: var(--rail-l) minmax(0, 1fr) var(--rail-r);
-  /* Four rows: the dial spans the first two, then the clock, then the
-     RINGS/FACE bar. The clock has a row of its own rather than floating over
-     the artwork, so it reads as a caption under the dial instead of sitting
-     on top of the ring ticks. */
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  /* Three rows: the dial spans the first two, then ONE row holding
+     RINGS · clock · FACE. The clock stays a caption under the dial rather
+     than floating on the ring ticks; the mode buttons flank it instead of
+     taking a row of their own, and the height that row used to take goes to
+     the conversation. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
   column-gap: 6px;
   row-gap: 4px;
   flex: 0 0 auto;
@@ -439,25 +440,28 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 /* ===================== 4. the control rail ===================== */
 
-/* --- RINGS / FACE: under the dial, exactly as wide --- */
+/* --- RINGS · clock · FACE: one row under the dial, exactly as wide ---
+   Three columns: RINGS hugs the clock from the left, FACE from the right, and
+   the clock keeps the dial's axis because both side columns are equal. */
 .mode-row {
-  grid-column: 2; grid-row: 4;
+  grid-column: 2; grid-row: 3;
   justify-self: center;
   width: var(--dial);
   position: relative; z-index: 2;
-  display: flex; gap: 3px; flex: none;
-  padding: 2px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--rail-fill);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center; column-gap: 8px;
 }
 .mode-btn {
-  flex: 1 1 0; min-width: 0;
-  min-height: 22px; padding: 2px 4px; border: 0; border-radius: 999px;
-  background: transparent; color: var(--text-dim);
-  font-size: .50em; letter-spacing: .10em; text-transform: uppercase; cursor: pointer;
+  min-width: 0; width: 100%; max-width: 92px;
+  min-height: 20px; padding: 2px 6px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--rail-fill); color: var(--text-dim);
+  font-size: .46em; letter-spacing: .10em; text-transform: uppercase; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.mode-btn[data-mode="rings"] { justify-self: end; }
+.mode-btn[data-mode="face"]  { justify-self: start; }
 .mode-btn.is-active {
-  color: #04161a; font-weight: 700;
+  color: #04161a; font-weight: 700; border-color: transparent;
   background: linear-gradient(135deg, var(--teal-soft), var(--teal));
   box-shadow: 0 0 12px rgba(67, 222, 210, .45);
 }
@@ -1026,10 +1030,8 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .sc.is-empty .sc-ico { color: #4d6c74; }
 
 /* ===================== HUD clock =====================
-   Column 2, top of the band: the dial's own axis, in space the band already
-   had. Nothing below it moves. */
+   The middle of the RINGS · clock · FACE row, on the dial's own axis. */
 .hud-clock {
-  grid-column: 2; grid-row: 3;
   justify-self: center; align-self: center;
   position: relative; z-index: 3;
   display: flex; flex-direction: column; align-items: center; gap: 0;
