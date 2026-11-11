@@ -13,6 +13,11 @@
  * the context is refused — on a phone that is rare, but a blank stage would be
  * much worse than a simpler face.
  *
+ * When the page provides a face media layer (#face-media: a looping video over
+ * a still image), FACE shows that instead of the WebGL bust, and no GL context
+ * is created for the stage at all. HOLO still turns it and the voice level
+ * still breathes it, through a CSS transform the compositor applies for free.
+ *
  * The render loop stops completely when the tab is hidden, when JARVIS is in
  * standby, or when the stage is not visible — an idle phone must not burn
  * battery on an animation nobody is looking at.
@@ -23,10 +28,12 @@ import Face3D from './face3d.js';
 import { emit } from '../core/bus.js';
 
 const MODES = ['rings', 'face'];
+/** The FACE renderer when the face is the video layer: draws nothing. */
+const MEDIA_FACE = { type: 'media' };
 const LEGACY_MODES = ['cube', '3d', 'box'];
 
 export default class Avatar {
-  constructor(canvas2d, canvasGl, canvasCard) {
+  constructor(canvas2d, canvasGl, canvasCard, faceMedia) {
     this.canvas2d = canvas2d;
     this.canvasGl = canvasGl;
     // The small hologram card above the dial. It is a second WebGL surface
@@ -34,6 +41,9 @@ export default class Avatar {
     // presented in two places — and the reference shows the face and the
     // rings on screen at the same time, not one instead of the other.
     this.canvasCard = canvasCard || null;
+    // FACE as video: see the header. Null keeps the WebGL bust.
+    this.faceMedia = faceMedia || null;
+    this._mediaTransform = '';
     // Never `desynchronized`: on Android Chrome a low-latency canvas is
     // promoted to a hardware overlay plane that ignores alpha, so the whole
     // canvas composites as an opaque black rectangle over the background.
@@ -110,7 +120,20 @@ export default class Avatar {
    * GL context costs memory.
    */
   _applyMode() {
+    const media = this.mode === 'face' && !!this.faceMedia;
+    if (this.faceMedia) this.faceMedia.hidden = !media;
+    if (media) {
+      // The stage draws nothing itself in FACE: both canvases step aside for
+      // the video layer, and the loop keeps running only for the card.
+      this.renderers.face = MEDIA_FACE;
+      this._glReady = false;
+      if (this.canvasGl) this.canvasGl.hidden = true;
+      this.canvas2d.hidden = true;
+      this._applyCard();
+      return;
+    }
     if (this.mode === 'face' && this.face3d && !this.face3d.failed) {
+      if (this.renderers.face === MEDIA_FACE) this.renderers.face = this.faceFallback;
       if (!this.face3d.ready) {
         const reduced = this.motion < 1;
         this._glReady = this.face3d.init(this.canvasGl, { quality: reduced ? 'low' : 'high' });
@@ -343,8 +366,11 @@ export default class Avatar {
       tiltX: this.tiltX,
       tiltY: this.tiltY,
     };
+    if (renderer === MEDIA_FACE) this._moveMedia();
     try {
-      if (renderer.type === 'gl') {
+      if (renderer === MEDIA_FACE) {
+        // Nothing to paint on the stage; the video layer is the face.
+      } else if (renderer.type === 'gl') {
         renderer.render(this.canvasGl, env);
       } else {
         if (!this.ctx) return;
@@ -369,6 +395,23 @@ export default class Avatar {
       }
       this.stop();
     }
+  }
+
+  /**
+   * HOLO and the voice, applied to the video layer. Only written when the
+   * value changes, so an idle face costs no style recalculation per frame.
+   */
+  _moveMedia() {
+    const tx = Math.max(-1.1, Math.min(1.1, this.tiltX));
+    const ty = Math.max(-0.6, Math.min(0.6, this.tiltY));
+    const speaking = this.activity === 'speaking' || this.activity === 'listening';
+    const breathe = speaking ? this.level * 0.035 * this.motion : 0;
+    const next = (tx || ty || breathe)
+      ? `perspective(900px) rotateY(${(tx * 12).toFixed(2)}deg) rotateX(${(-ty * 12).toFixed(2)}deg) scale(${(1 + breathe).toFixed(3)})`
+      : '';
+    if (next === this._mediaTransform) return;
+    this._mediaTransform = next;
+    this.faceMedia.style.transform = next;
   }
 
   dispose() {

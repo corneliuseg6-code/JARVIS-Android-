@@ -7,7 +7,7 @@
    cache first, so an already-installed PWA would keep serving the old shell
    until a new cache name makes install() re-fetch it and activate() delete the
    previous one. */
-const CACHE = 'jarvis-v4-9-chat-nav';
+const CACHE = 'jarvis-v4-10-face-video';
 const SHELL = [
   '/',
   '/index.html',
@@ -30,6 +30,9 @@ const SHELL = [
   '/models/head-LICENSE.txt',
   // Backdrop of the conversation panel (about 1 MB).
   '/media/chat-bg.mp4',
+  // FACE: the looping holographic face (about 1 MB) and its still.
+  '/media/face-loop.mp4',
+  '/media/face-still.jpg',
   '/js/i18n/index.js',
   '/js/i18n/ro.js',
   '/js/i18n/en.js',
@@ -39,7 +42,7 @@ const SHELL = [
   '/js/i18n/it.js',
   '/js/ui/armory.js',
   '/js/ui/chat.js',
-  '/js/ui/chat-video.js',
+  '/js/ui/loop-video.js',
   '/js/ui/eyes.js',
   '/js/ui/magnifier.js',
   '/js/ui/mic.js',

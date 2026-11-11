@@ -33,7 +33,7 @@ import Clock from './ui/clock.js';
 import Backdrop from './ui/backdrop.js';
 import Modes from './ui/modes.js';
 import Folders from './ui/folders.js';
-import ChatVideo from './ui/chat-video.js';
+import LoopVideo from './ui/loop-video.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
 
@@ -292,6 +292,7 @@ function applyAvatarMode(mode, { persist = false } = {}) {
   // the only text sitting on the artwork.
   state.set({ avatarMode: applied });
   state.saveLocal({ avatarMode: applied });
+  app.faceVideo?.setOpen(applied === 'face');
   if (persist) {
     api.setConfig({ avatar_mode: applied })
       .then((config) => state.set({ config }))
@@ -326,6 +327,7 @@ function applyMotion(reduced) {
   app.avatar?.setReducedMotion(reduced);
   app.backdrop?.setReducedMotion(reduced);
   app.chatVideo?.setReducedMotion(reduced);
+  app.faceVideo?.setReducedMotion(reduced);
   document.getElementById('edge')?.classList.toggle('is-still', !!reduced);
 }
 
@@ -348,11 +350,19 @@ async function boot() {
   applyTranslations();
 
   // 2. avatar (and the conversation's video, before applyMotion reaches it)
-  app.chatVideo = guard('chatVideo', () => new ChatVideo(document.getElementById('chat-video')));
+  app.chatVideo = guard('chatVideo', () => new LoopVideo(
+    document.getElementById('chat-video'), { src: '/media/chat-bg.mp4' },
+  ));
+  // FACE is a looping video over a still of the same face. The still shows
+  // while the video loads, if it cannot play, and whenever it is paused.
+  app.faceVideo = guard('faceVideo', () => new LoopVideo(
+    document.getElementById('face-video'), { src: '/media/face-loop.mp4', reducedFrame: false },
+  ));
   app.avatar = guard('avatar', () => new Avatar(
     document.getElementById('avatar-canvas'),
     document.getElementById('avatar-gl'),
     document.getElementById('avatar-card-gl'),
+    document.getElementById('face-media'),
   ));
   app.avatar?.start();
   applyAvatarMode((config && config.avatar_mode) || local.avatarMode || 'rings');
@@ -494,12 +504,14 @@ async function boot() {
     setActivity('idle');
     app.status?.schedule();
     app.chatVideo?.setStandby(true);
+    app.faceVideo?.setStandby(true);
   });
   on('power:active', () => {
     applyEdgeState();
     setActivity('idle');
     app.status?.refresh();
     app.chatVideo?.setStandby(false);
+    app.faceVideo?.setStandby(false);
   });
   on('mic:on', () => setActivity('listening'));
   on('mic:off', () => {

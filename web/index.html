@@ -160,6 +160,13 @@
            is Canvas 2D while FACE is WebGL. Only the active one is shown. -->
       <canvas id="avatar-canvas" class="avatar-canvas" aria-hidden="true"></canvas>
       <canvas id="avatar-gl" class="avatar-canvas" aria-hidden="true" hidden></canvas>
+      <!-- FACE: the holographic face as a looping video over a still of the
+           same face. Shown only in FACE mode; RINGS keeps its canvas. -->
+      <div class="face-media" id="face-media" aria-hidden="true" hidden>
+        <img class="face-still" src="/media/face-still.jpg" alt="" loading="lazy" decoding="async">
+        <video id="face-video" muted loop playsinline preload="none"
+               disablepictureinpicture disableremoteplayback tabindex="-1"></video>
+      </div>
 
       <button class="stage-exit" id="btn-immersive-exit" type="button" hidden
               data-i18n-aria="immersive.exit" data-i18n-title="immersive.exit">✕</button>
@@ -205,7 +212,7 @@
        console and the chat bar do not need. -->
   <section class="chat-panel" id="chat-panel">
     <!-- Animated backdrop, shown and played only while the panel is open on
-         CHAT. The source is attached from js/ui/chat-video.js. -->
+         CHAT. The source is attached from js/ui/loop-video.js. -->
     <div class="chat-bg" aria-hidden="true">
       <video id="chat-video" muted loop playsinline preload="none"
              disablepictureinpicture disableremoteplayback tabindex="-1"></video>
