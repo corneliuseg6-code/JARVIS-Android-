@@ -518,14 +518,15 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .chat-grip:hover .chat-grip-bar,
 .chat-grip:focus-visible .chat-grip-bar { background: var(--teal-soft); width: 54px; }
 
-/* Collapsed: the grip alone remains, and everything below it is gone from
-   the layout so the freed height goes back to the console. */
+/* Collapsed: the grip and the header row (CHAT, FOLDERS, History, New)
+   remain, so the panel's navigation never leaves the screen; only the content
+   below them folds away, and the freed height goes back to the console.
+   --chat-grip-h is measured by chat.js as grip + header. */
 .app[data-chat="collapsed"] .chat-panel {
   max-height: var(--chat-grip-h, 22px);
   border-color: transparent;
   background: none;
 }
-.app[data-chat="collapsed"] .chat-head,
 .app[data-chat="collapsed"] .messages,
 .app[data-chat="collapsed"] .history-list { opacity: 0; pointer-events: none; }
 .app[data-chat="collapsed"] .chat-grip-bar { width: 58px; background: var(--teal-soft); }
@@ -581,6 +582,8 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   transform: translateZ(0);             /* its own GPU layer */
 }
 .chat-bg video.is-ready { opacity: .62; }
+/* Over the video the dim grip bar is easy to lose; give it the bright tone. */
+.app[data-chat-bg="on"] .chat-grip-bar { background: var(--teal-soft); }
 /* Readability scrim: darker at the top (tabs) and bottom, a lighter veil
    through the middle where the messages scroll. */
 .chat-bg::after {
