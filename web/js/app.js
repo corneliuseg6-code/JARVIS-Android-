@@ -23,6 +23,7 @@ import Power from './ui/power.js';
 import Magnifier from './ui/magnifier.js';
 import Status from './ui/status.js';
 import Chat from './ui/chat.js';
+import DockVideo from './ui/dock-video.js';
 import Armory from './ui/armory.js';
 import Eyes from './ui/eyes.js';
 import Modes from './ui/modes.js';
@@ -77,6 +78,7 @@ function setDock(expanded) {
   root?.setAttribute('data-dock', expanded ? 'expanded' : 'collapsed');
   document.getElementById('btn-dock')?.setAttribute('aria-expanded', String(expanded));
   state.set({ dockOpen: expanded });
+  app.dockVideo?.setOpen(expanded);
   requestAnimationFrame(() => app.avatar?.resize());
 }
 
@@ -265,6 +267,7 @@ function applyAvatarMode(mode, { persist = false } = {}) {
 function applyMotion(reduced) {
   root?.setAttribute('data-motion', reduced ? 'reduced' : 'full');
   app.avatar?.setReducedMotion(reduced);
+  app.dockVideo?.setReducedMotion(reduced);
 }
 
 // ---------------------------------------------------------------- boot
@@ -285,7 +288,8 @@ async function boot() {
   applyLanguage(language);
   applyTranslations();
 
-  // 2. avatar
+  // 2. avatar (and the messages-panel backdrop, before applyMotion reaches it)
+  app.dockVideo = guard('dockVideo', () => new DockVideo(document.getElementById('dock-video')));
   app.avatar = guard('avatar', () => new Avatar(
     document.getElementById('avatar-canvas'),
     document.getElementById('avatar-gl'),
@@ -401,8 +405,13 @@ async function boot() {
     setNote('');
     setActivity('idle');
     app.status?.schedule();
+    app.dockVideo?.setStandby(true);
   });
-  on('power:active', () => { setActivity('idle'); app.status?.refresh(); });
+  on('power:active', () => {
+    setActivity('idle');
+    app.status?.refresh();
+    app.dockVideo?.setStandby(false);
+  });
   on('mic:on', () => setActivity('listening'));
   on('mic:off', () => {
     app.modes?.micWentOff();

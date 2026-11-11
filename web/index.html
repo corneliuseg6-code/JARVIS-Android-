@@ -154,6 +154,13 @@
 
   <!-- ===================== chat dock ===================== -->
   <section class="dock" id="dock" data-panel="chat">
+    <!-- Animated backdrop, shown and played only while the dock is expanded.
+         The source is attached from js/ui/dock-video.js on first open. -->
+    <div class="dock-bg" aria-hidden="true">
+      <video id="dock-video" muted loop playsinline preload="none"
+             disablepictureinpicture disableremoteplayback tabindex="-1"></video>
+    </div>
+
     <button class="dock-grip" id="btn-dock" type="button"
             data-i18n-aria="chat.expand" aria-expanded="false">
       <span class="grip-bar" aria-hidden="true"></span>

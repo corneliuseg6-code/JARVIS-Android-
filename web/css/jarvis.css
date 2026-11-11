@@ -461,6 +461,53 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-dock="expanded"] .dock-ticker { display: none; }
 .app[data-dock="expanded"] .dock-grip .grip-bar { background: var(--teal); }
 
+/* ---- animated backdrop of the expanded messages panel ----
+   The video sits behind everything else in the dock and is clipped to it, so
+   it never touches the cosmic page background, the visualiser or the HUD.
+   Performance on Android: no filters or backdrop-filter over the video (each
+   would re-blur every frame), the dimming is a static gradient on its own
+   layer, and the whole backdrop is display:none while the dock is closed, so a
+   collapsed dock neither decodes nor composites it. */
+.dock { position: relative; overflow: hidden; isolation: isolate; }
+.dock > :not(.dock-bg) { position: relative; z-index: 1; }
+
+.dock-bg {
+  display: none;
+  position: absolute; inset: 0; z-index: 0;
+  pointer-events: none;
+  border-radius: inherit; overflow: hidden;
+  background: var(--panel-solid);
+}
+.dock-bg video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center;
+  opacity: 0; transition: opacity .45s ease-out;
+  transform: translateZ(0);             /* its own GPU layer */
+}
+.dock-bg video.is-ready { opacity: .62; }
+/* Readability scrim: darker at the top (header) and bottom (composer), a
+   lighter veil through the middle where the messages scroll. */
+.dock-bg::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(180deg,
+      rgba(3, 10, 18, .78) 0%,
+      rgba(3, 10, 18, .42) 18%,
+      rgba(3, 10, 18, .42) 76%,
+      rgba(3, 10, 18, .85) 100%);
+}
+.app[data-dock="expanded"] .dock-bg { display: block; }
+
+/* Over a moving picture every bubble needs an opaque enough base and a little
+   text shadow; the colours and borders stay exactly as they were. */
+.app[data-dock="expanded"] .msg { text-shadow: 0 1px 2px rgba(0, 0, 0, .7); }
+.app[data-dock="expanded"] .msg-user {
+  background:
+    linear-gradient(135deg, rgba(43, 123, 255, .26), rgba(67, 222, 210, .16)),
+    rgba(4, 14, 26, .82);
+}
+.app[data-dock="expanded"] .messages .empty { color: var(--teal-soft); text-shadow: 0 1px 3px #000; }
+
 .msg {
   max-width: 90%; padding: 6px 9px; border-radius: 9px;
   font-size: .72em; line-height: 1.42; white-space: pre-wrap; word-break: break-word;
