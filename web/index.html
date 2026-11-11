@@ -204,6 +204,12 @@
        Always open, and the only thing that grows: it takes every pixel the
        console and the chat bar do not need. -->
   <section class="chat-panel" id="chat-panel">
+    <!-- Animated backdrop, shown and played only while the panel is open on
+         CHAT. The source is attached from js/ui/chat-video.js. -->
+    <div class="chat-bg" aria-hidden="true">
+      <video id="chat-video" muted loop playsinline preload="none"
+             disablepictureinpicture disableremoteplayback tabindex="-1"></video>
+    </div>
     <!-- Drag me down to get the dial out from behind the conversation.
          A button, not a bare div, so it answers to a tap and to a keyboard. -->
     <button class="chat-grip" id="chat-grip" type="button"

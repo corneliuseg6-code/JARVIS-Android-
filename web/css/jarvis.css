@@ -557,6 +557,53 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 }
 .messages .empty { color: var(--text-dim); font-size: .66em; text-align: center; margin: auto; }
 
+/* ---------- animated backdrop of the conversation ----------
+   The video sits behind everything else in the panel and is clipped to it,
+   so it never touches the particle backdrop, the dial or the console.
+   Performance on Android: no filters or backdrop-filter over the video (each
+   would re-blur every frame), the dimming is a static gradient on its own
+   layer, and the backdrop is display:none while the panel is collapsed or on
+   FOLDERS, so it is neither decoded nor composited then. */
+.chat-panel { position: relative; isolation: isolate; }
+.chat-panel > :not(.chat-bg) { position: relative; z-index: 1; }
+
+.chat-bg {
+  display: none;
+  position: absolute; inset: 0; z-index: 0;
+  pointer-events: none;
+  border-radius: inherit; overflow: hidden;
+  background: var(--panel-solid);
+}
+.chat-bg video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center;
+  opacity: 0; transition: opacity .45s ease-out;
+  transform: translateZ(0);             /* its own GPU layer */
+}
+.chat-bg video.is-ready { opacity: .62; }
+/* Readability scrim: darker at the top (tabs) and bottom, a lighter veil
+   through the middle where the messages scroll. */
+.chat-bg::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(180deg,
+      rgba(3, 10, 18, .78) 0%,
+      rgba(3, 10, 18, .42) 18%,
+      rgba(3, 10, 18, .42) 76%,
+      rgba(3, 10, 18, .85) 100%);
+}
+.app[data-chat-bg="on"] .chat-bg { display: block; }
+
+/* Over a moving picture every bubble needs an opaque enough base and a little
+   text shadow; colours and borders stay exactly as they were. */
+.app[data-chat-bg="on"] .msg { text-shadow: 0 1px 2px rgba(0, 0, 0, .7); }
+.app[data-chat-bg="on"] .msg-user {
+  background:
+    linear-gradient(135deg, rgba(43, 123, 255, .26), rgba(67, 222, 210, .16)),
+    rgba(4, 14, 26, .82);
+}
+.app[data-chat-bg="on"] .messages .empty { color: var(--teal-soft); text-shadow: 0 1px 3px #000; }
+
 /* ===================== 6/7. the chat bar ===================== */
 .dock {
   display: flex; flex-direction: column;

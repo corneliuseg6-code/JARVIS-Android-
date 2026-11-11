@@ -33,6 +33,7 @@ import Clock from './ui/clock.js';
 import Backdrop from './ui/backdrop.js';
 import Modes from './ui/modes.js';
 import Folders from './ui/folders.js';
+import ChatVideo from './ui/chat-video.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
 
@@ -298,10 +299,33 @@ function applyAvatarMode(mode, { persist = false } = {}) {
   }
 }
 
+/**
+ * The conversation's video plays only while the panel is open on CHAT and
+ * the screen is not immersive. Those states are owned by chat.js and
+ * setImmersive, which publish them as attributes; watching the attributes
+ * keeps this feature out of their code entirely.
+ */
+function watchChatVideo() {
+  const folders = document.getElementById('folders-panel');
+  const sync = () => {
+    const showing = root?.getAttribute('data-chat') !== 'collapsed'
+      && root?.getAttribute('data-immersive') !== 'on'
+      && (!folders || folders.hidden);
+    root?.setAttribute('data-chat-bg', showing ? 'on' : 'off');
+    app.chatVideo?.setOpen(showing);
+  };
+  if (root) {
+    new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-chat', 'data-immersive'] });
+  }
+  if (folders) new MutationObserver(sync).observe(folders, { attributes: true, attributeFilter: ['hidden'] });
+  sync();
+}
+
 function applyMotion(reduced) {
   root?.setAttribute('data-motion', reduced ? 'reduced' : 'full');
   app.avatar?.setReducedMotion(reduced);
   app.backdrop?.setReducedMotion(reduced);
+  app.chatVideo?.setReducedMotion(reduced);
   document.getElementById('edge')?.classList.toggle('is-still', !!reduced);
 }
 
@@ -323,7 +347,8 @@ async function boot() {
   applyLanguage(language);
   applyTranslations();
 
-  // 2. avatar
+  // 2. avatar (and the conversation's video, before applyMotion reaches it)
+  app.chatVideo = guard('chatVideo', () => new ChatVideo(document.getElementById('chat-video')));
   app.avatar = guard('avatar', () => new Avatar(
     document.getElementById('avatar-canvas'),
     document.getElementById('avatar-gl'),
@@ -468,8 +493,14 @@ async function boot() {
     setNote('');
     setActivity('idle');
     app.status?.schedule();
+    app.chatVideo?.setStandby(true);
   });
-  on('power:active', () => { applyEdgeState(); setActivity('idle'); app.status?.refresh(); });
+  on('power:active', () => {
+    applyEdgeState();
+    setActivity('idle');
+    app.status?.refresh();
+    app.chatVideo?.setStandby(false);
+  });
   on('mic:on', () => setActivity('listening'));
   on('mic:off', () => {
     app.modes?.micWentOff();
@@ -480,6 +511,7 @@ async function boot() {
   setView('home');
   setNav(false);
   root?.setAttribute('data-immersive', 'off');
+  watchChatVideo();
 
   const problems = missingKeys();
   if (Object.keys(problems).length) console.warn('[i18n] incomplete translations', problems);
