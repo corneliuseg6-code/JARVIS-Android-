@@ -322,12 +322,39 @@ function watchChatVideo() {
   sync();
 }
 
+/**
+ * The corner card's face plays only while the card is actually on screen: it
+ * is hidden when the keyboard is up, on short screens and in immersive mode.
+ * An IntersectionObserver reports display:none as not intersecting, which
+ * covers the first two; immersive only fades the card, so it is watched too.
+ */
+function watchCardVideo() {
+  const card = document.getElementById('avatar-card');
+  if (!card || !app.cardVideo) return;
+  let onScreen = false;
+  const sync = () => {
+    app.cardVideo.setOpen(onScreen && !card.hidden && root?.getAttribute('data-immersive') !== 'on');
+  };
+  if (typeof IntersectionObserver === 'function') {
+    new IntersectionObserver((entries) => {
+      onScreen = entries[entries.length - 1].isIntersecting;
+      sync();
+    }).observe(card);
+  } else {
+    onScreen = true;
+  }
+  if (root) new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-immersive'] });
+  new MutationObserver(sync).observe(card, { attributes: true, attributeFilter: ['hidden'] });
+  sync();
+}
+
 function applyMotion(reduced) {
   root?.setAttribute('data-motion', reduced ? 'reduced' : 'full');
   app.avatar?.setReducedMotion(reduced);
   app.backdrop?.setReducedMotion(reduced);
   app.chatVideo?.setReducedMotion(reduced);
   app.faceVideo?.setReducedMotion(reduced);
+  app.cardVideo?.setReducedMotion(reduced);
   document.getElementById('edge')?.classList.toggle('is-still', !!reduced);
 }
 
@@ -358,11 +385,17 @@ async function boot() {
   app.faceVideo = guard('faceVideo', () => new LoopVideo(
     document.getElementById('face-video'), { src: '/media/face-loop.mp4', reducedFrame: false },
   ));
+  // The corner card shows the same face in miniature, from its own small
+  // copy of the loop so the phone is never decoding the large one twice.
+  app.cardVideo = guard('cardVideo', () => new LoopVideo(
+    document.getElementById('card-video'), { src: '/media/face-card.mp4', reducedFrame: false },
+  ));
   app.avatar = guard('avatar', () => new Avatar(
     document.getElementById('avatar-canvas'),
     document.getElementById('avatar-gl'),
     document.getElementById('avatar-card-gl'),
     document.getElementById('face-media'),
+    document.getElementById('card-face'),
   ));
   app.avatar?.start();
   applyAvatarMode((config && config.avatar_mode) || local.avatarMode || 'rings');
@@ -505,6 +538,7 @@ async function boot() {
     app.status?.schedule();
     app.chatVideo?.setStandby(true);
     app.faceVideo?.setStandby(true);
+    app.cardVideo?.setStandby(true);
   });
   on('power:active', () => {
     applyEdgeState();
@@ -512,6 +546,7 @@ async function boot() {
     app.status?.refresh();
     app.chatVideo?.setStandby(false);
     app.faceVideo?.setStandby(false);
+    app.cardVideo?.setStandby(false);
   });
   on('mic:on', () => setActivity('listening'));
   on('mic:off', () => {
@@ -524,6 +559,7 @@ async function boot() {
   setNav(false);
   root?.setAttribute('data-immersive', 'off');
   watchChatVideo();
+  watchCardVideo();
 
   const problems = missingKeys();
   if (Object.keys(problems).length) console.warn('[i18n] incomplete translations', problems);

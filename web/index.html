@@ -99,6 +99,13 @@
          as the rings rather than instead of them. -->
     <section class="avatar-card" id="avatar-card">
       <canvas id="avatar-card-gl" class="avatar-canvas" aria-hidden="true"></canvas>
+      <!-- The same green face as FACE mode, miniaturised: a small copy of the
+           loop over the same still. -->
+      <div class="card-face" id="card-face" aria-hidden="true">
+        <img class="face-still" src="/media/face-still.jpg" alt="" decoding="async">
+        <video id="card-video" muted loop playsinline preload="none"
+               disablepictureinpicture disableremoteplayback tabindex="-1"></video>
+      </div>
     </section>
 
     <!-- ============ 4. control rail, down the right ============ -->

@@ -33,7 +33,7 @@ const MEDIA_FACE = { type: 'media' };
 const LEGACY_MODES = ['cube', '3d', 'box'];
 
 export default class Avatar {
-  constructor(canvas2d, canvasGl, canvasCard, faceMedia) {
+  constructor(canvas2d, canvasGl, canvasCard, faceMedia, cardMedia) {
     this.canvas2d = canvas2d;
     this.canvasGl = canvasGl;
     // The small hologram card above the dial. It is a second WebGL surface
@@ -43,6 +43,10 @@ export default class Avatar {
     this.canvasCard = canvasCard || null;
     // FACE as video: see the header. Null keeps the WebGL bust.
     this.faceMedia = faceMedia || null;
+    // The corner card as video too: the same green face, miniaturised. With
+    // it, the card needs no WebGL context of its own.
+    this.cardMedia = cardMedia || null;
+    if (this.cardMedia && this.canvasCard) this.canvasCard.hidden = true;
     this._mediaTransform = '';
     // Never `desynchronized`: on Android Chrome a low-latency canvas is
     // promoted to a hardware overlay plane that ignores alpha, so the whole
@@ -51,7 +55,7 @@ export default class Avatar {
 
     this.rings = new RingsAvatar();
     this.face3d = canvasGl ? new Face3D() : null;
-    this.cardFace = canvasCard ? new Face3D() : null;
+    this.cardFace = canvasCard && !cardMedia ? new Face3D() : null;
     this.faceFallback = new FaceAvatar();
     this.renderers = { rings: this.rings, face: this.faceFallback };
     this._cardReady = false;

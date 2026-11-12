@@ -71,7 +71,7 @@ def check_frontend():
         "js/i18n/index.js", "js/ui/mic.js", "js/ui/power.js", "js/ui/magnifier.js",
         "js/ui/armory.js", "js/ui/eyes.js", "js/ui/settings.js", "js/ui/chat.js",
         "js/ui/modes.js", "js/ui/loop-video.js", "media/chat-bg.mp4",
-        "media/face-loop.mp4", "media/face-still.jpg",
+        "media/face-loop.mp4", "media/face-still.jpg", "media/face-card.mp4",
     ]
     for rel in required:
         (ok if (web / rel).is_file() else bad)(f"web/{rel}")

@@ -273,6 +273,29 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   overflow: hidden;
 }
 
+/* The card's face: the same green loop as FACE mode, as a centred square at
+   the card's full height, so the face is whole and never cropped. The card
+   is wider than it is tall; the square's sides are feathered into the
+   card's own dark ground instead of ending in hard black edges. The still
+   underneath shows while the loop loads, pauses or cannot play. */
+.card-face {
+  position: absolute; inset: 0; margin: auto;
+  height: 100%; aspect-ratio: 1 / 1; width: auto; max-width: 100%;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent);
+          mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent);
+}
+.card-face > img,
+.card-face > video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; display: block;
+}
+.card-face > video { opacity: 0; transition: opacity .35s ease-out; }
+.card-face > video.is-ready { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .card-face > video { transition: none; } }
+/* Behind the face, the card's ground matches the animation's black. */
+.avatar-card:has(.card-face) { background: #020604; }
+
 /* ============ focus timer, under the console ============ */
 .focus-block {
   display: grid;
