@@ -124,21 +124,11 @@ export default class Chat {
     this.app = document.getElementById('app');
     if (!this.panel || !this.app) return;
 
-    // Collapsed, the panel keeps its grip AND its header row (CHAT, FOLDERS,
-    // History, New): only the content below them folds away. So the
-    // collapsed height is measured from the panel's top edge to the bottom
-    // of the header, plus the panel's own bottom padding and border, rather
-    // than hard-coded — the header can wrap onto two lines in a long
-    // language, and the magnifier scales it.
-    this.head = this.panel.querySelector('.chat-head');
-    const gripHeight = () => {
-      const grip = Math.round(this.grip?.getBoundingClientRect().height || 22);
-      const head = this.head?.getBoundingClientRect();
-      if (!head || !head.height) return grip;   // header hidden (keyboard open)
-      const style = getComputedStyle(this.panel);
-      const below = (parseFloat(style.paddingBottom) || 0) + (parseFloat(style.borderBottomWidth) || 0);
-      return Math.max(grip, Math.ceil(head.bottom - this.panel.getBoundingClientRect().top + below));
-    };
+    // Collapsed, the panel is only its grip. The navigation row (CHAT,
+    // FOLDERS, History, New) is not part of the panel at all: it is its own
+    // row above it, so collapsing or expanding never moves it. The grip's
+    // height is measured, not hard-coded, so zoom and fonts are respected.
+    const gripHeight = () => Math.round(this.grip?.getBoundingClientRect().height || 22);
     this._measureCollapsed = () => {
       this.gripH = gripHeight();
       this.app.style.setProperty('--chat-grip-h', this.gripH + 'px');
@@ -229,8 +219,8 @@ export default class Chat {
 
     // While collapsed the panel is only the grip, so an upward swipe there
     // is the way back.
-    // A press on one of the header's buttons is a tap on that button, not a
-    // swipe: capturing the pointer there would swallow the button's click.
+    // A press on a button is a tap on that button, not a swipe: capturing
+    // the pointer there would swallow the button's click.
     this.panel.addEventListener('pointerdown', (e) => {
       if (!this.collapsed || e.target === this.grip || this.grip?.contains(e.target)) return;
       if (e.target.closest?.('button')) return;
@@ -240,12 +230,9 @@ export default class Chat {
     this.panel.addEventListener('pointerup', end);
 
     this._measureCollapsed();
-    // Re-measure whenever the grip or header changes size (language, zoom,
-    // rotation), so a collapsed panel never clips its own buttons.
-    if (typeof ResizeObserver === 'function') {
-      const ro = new ResizeObserver(() => this._measureCollapsed());
-      if (this.grip) ro.observe(this.grip);
-      if (this.head) ro.observe(this.head);
+    // Re-measure if the grip changes size (zoom, rotation).
+    if (typeof ResizeObserver === 'function' && this.grip) {
+      new ResizeObserver(() => this._measureCollapsed()).observe(this.grip);
     }
     // The remembered state is applied without animating: a panel that slides
     // shut on every load would look like a glitch, not a preference.

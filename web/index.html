@@ -212,6 +212,23 @@
     </span>
   </section>
 
+  <!-- ============ the chat navigation, fixed ============
+       Its own row directly under RINGS · clock · FACE, outside the sliding
+       panel: collapsing or expanding the conversation never moves it. -->
+  <nav class="chat-head" id="chat-nav" aria-label="Chat" data-i18n-aria="nav.chat">
+    <!-- One panel, two views: the conversation, and the workspace as a
+         network of real folders. -->
+    <div class="panel-tabs" role="tablist">
+      <button class="panel-tab is-on" id="tab-chat" type="button" role="tab"
+              aria-selected="true" aria-controls="messages" data-i18n="chat.tabChat">CHAT</button>
+      <button class="panel-tab" id="tab-folders" type="button" role="tab"
+              aria-selected="false" aria-controls="folders-panel"
+              data-i18n="chat.tabFolders">FOLDERS</button>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="btn-history" type="button" data-i18n="chat.history">History</button>
+    <button class="btn btn-ghost btn-sm" id="btn-new-chat" type="button" data-i18n="chat.new">New</button>
+  </nav>
+
   <!-- ============ 5. the conversation ============
        Always open, and the only thing that grows: it takes every pixel the
        console and the chat bar do not need. -->
@@ -229,20 +246,6 @@
             data-i18n-aria="chat.collapse" data-i18n-title="chat.collapse">
       <span class="chat-grip-bar" aria-hidden="true"></span>
     </button>
-    <div class="chat-head">
-      <!-- One panel, two views: the conversation, and the workspace as a
-           network of real folders. -->
-      <div class="panel-tabs" role="tablist">
-        <button class="panel-tab is-on" id="tab-chat" type="button" role="tab"
-                aria-selected="true" aria-controls="messages" data-i18n="chat.tabChat">CHAT</button>
-        <button class="panel-tab" id="tab-folders" type="button" role="tab"
-                aria-selected="false" aria-controls="folders-panel"
-                data-i18n="chat.tabFolders">FOLDERS</button>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="btn-history" type="button" data-i18n="chat.history">History</button>
-      <button class="btn btn-ghost btn-sm" id="btn-new-chat" type="button" data-i18n="chat.new">New</button>
-    </div>
-
     <div class="messages" id="messages" aria-live="polite">
       <p class="empty" data-i18n="chat.empty"></p>
     </div>

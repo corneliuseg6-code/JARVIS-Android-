@@ -584,10 +584,9 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .chat-grip:hover .chat-grip-bar,
 .chat-grip:focus-visible .chat-grip-bar { background: var(--teal-soft); width: 54px; }
 
-/* Collapsed: the grip and the header row (CHAT, FOLDERS, History, New)
-   remain, so the panel's navigation never leaves the screen; only the content
-   below them folds away, and the freed height goes back to the console.
-   --chat-grip-h is measured by chat.js as grip + header. */
+/* Collapsed: the grip alone remains and the content folds away. The
+   navigation row is not in this panel — it is its own fixed row above it
+   (#chat-nav) — so it never moves. --chat-grip-h is measured by chat.js. */
 .app[data-chat="collapsed"] .chat-panel {
   max-height: var(--chat-grip-h, 22px);
   border-color: transparent;
@@ -596,12 +595,14 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-chat="collapsed"] .messages,
 .app[data-chat="collapsed"] .history-list { opacity: 0; pointer-events: none; }
 .app[data-chat="collapsed"] .chat-grip-bar { width: 58px; background: var(--teal-soft); }
-.chat-head, .messages { transition: opacity .18s ease; }
+.messages { transition: opacity .18s ease; }
 
 /* With the conversation out of the way, centre what is left rather than
    leaving the dial pinned to the top above empty space. */
 .workspace { transition: justify-content .3s ease; }
-.app[data-chat="collapsed"] .workspace { justify-content: center; }
+/* The column stays top-aligned in both states: centring it when collapsed
+   would slide the console, the clock and the navigation row down the screen.
+   Collapsed, the freed height simply sits between the grip and the chat bar. */
 
 /* While a finger is on the grip, follow it exactly — no transition fighting
    the drag. The class is removed on release so the snap animates. */
@@ -611,7 +612,14 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   .chat-panel, .workspace, .chat-head, .messages { transition: none; }
 }
 
-.chat-head { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
+/* The chat navigation: its own row in the workspace column, directly under
+   RINGS · clock · FACE and above the sliding panel. Inset to line up with
+   the panel's content. */
+.chat-head {
+  display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none;
+  padding: 0 7px;
+  position: relative; z-index: 2;
+}
 .chat-head .btn { min-height: 24px; padding: 2px 9px; font-size: .56em; }
 
 .messages {
@@ -1347,7 +1355,7 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
    They fade rather than being switched off, so the transition is smooth and
    the canvas — watched by a ResizeObserver — keeps step with it instead of
    jumping at the end. */
-.topbar, .rail, .dock, .avatar-card, .focus-block, .mode-row {
+.topbar, .rail, .dock, .avatar-card, .focus-block, .mode-row, .chat-head {
   transition: opacity .18s ease, transform .18s ease;
 }
 /* The conversation panel needs its collapse in the same declaration: this
@@ -1388,6 +1396,7 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .app[data-immersive="on"] .mode-row,
 .app[data-immersive="on"] .hud-clock,
 .app[data-immersive="on"] .focus-block,
+.app[data-immersive="on"] .chat-head,
 .app[data-immersive="on"] .chat-panel {
   opacity: 0;
   transform: translateY(6px);
