@@ -261,6 +261,11 @@ class McpSession:
                 "name": t.get("name", ""),
                 "description": (t.get("description") or "")[:400],
                 "inputSchema": t.get("inputSchema") or {},
+                # The spec's behaviour hints (readOnlyHint, destructiveHint …).
+                # Kept so the chat loop can tell a tool that reads from one
+                # that writes; see toolchat.is_mutating for how far they are
+                # trusted, which is not all the way.
+                "annotations": t.get("annotations") if isinstance(t.get("annotations"), dict) else {},
             }
             for t in result.get("tools", [])
         ]

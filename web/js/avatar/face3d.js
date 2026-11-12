@@ -17,16 +17,20 @@
  *   interference     a slow flicker and a rare horizontal tear
  *   depth tint       far surfaces fall towards deep blue, near ones to cyan
  *
- * Plus a sparse mesh overlay, glowing irises, drifting particles and a
- * volumetric wash behind the bust.
+ * Plus a sparse mesh overlay and glowing irises.
+ *
+ * It paints no background of its own. The stage behind this canvas is the
+ * same element in RINGS and in FACE, and the ambient particle field runs
+ * across the whole screen, so switching mode changes the visualiser and
+ * leaves everything behind it alone.
  *
  * The jaw is a real rotation about a hinge behind the ear, driven by a
  * per-vertex weight, and the lids close over the eyeballs the same way — both
  * happen in the vertex shader, so animating them costs nothing per frame.
  *
  * Everything is WebGL 1 with no extensions, which is what gets it running on
- * every Android phone that can run Chrome. Three draw calls for the bust, one
- * for the particles, one for the wash.
+ * every Android phone that can run Chrome. Three draw calls for the bust and
+ * one for the irises.
  */
 import { buildBust, buildCurves } from './head-mesh.js';
 import { parseGLB, fitBust } from './glb.js';
@@ -320,24 +324,6 @@ void main() {
   gl_FragColor = vec4(uBright * (1.45 + band * 1.4), a * uGain);
 }`;
 
-const WASH_VS = `
-precision highp float;
-attribute vec2 aPos;
-varying vec2 vUv;
-void main() { vUv = aPos; gl_Position = vec4(aPos, 0.0, 1.0); }`;
-
-const WASH_FS = `
-precision highp float;
-varying vec2 vUv;
-uniform float uEnergy;
-uniform float uAspect;
-void main() {
-  vec2 p = vec2(vUv.x * uAspect, vUv.y + 0.08);
-  float r = length(p);
-  float a = exp(-r * r * 2.1) * (0.16 + uEnergy * 0.14);
-  gl_FragColor = vec4(vec3(0.10, 0.52, 0.72) * a, a);
-}`;
-
 // ---------------------------------------------------------------- renderer
 
 function compile(gl, type, source) {
@@ -452,7 +438,6 @@ export default class Face3D {
     this.bustProgram = program(gl, BUST_VS, BUST_FS);
     this.curveProgram = program(gl, CURVE_VS, CURVE_FS);
     this.pointProgram = program(gl, POINT_VS, POINT_FS);
-    this.washProgram = program(gl, WASH_VS, WASH_FS);
 
     const buffer = (data, target = gl.ARRAY_BUFFER) => {
       const b = gl.createBuffer();
@@ -497,25 +482,6 @@ export default class Face3D {
     });
     this.eyeBuffer = buffer(eyes);
     this.eyeSeedBuffer = buffer(eyeSeed);
-
-    // Particles drifting through the volume of the bust.
-    const n = quality === 'low' ? 160 : 420;
-    const pos = new Float32Array(n * 3);
-    const seed = new Float32Array(n * 2);
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.35 + Math.pow(Math.random(), 0.6) * 1.5;
-      pos[i * 3] = Math.cos(a) * r;
-      pos[i * 3 + 1] = 0;
-      pos[i * 3 + 2] = Math.sin(a) * r * 0.7 - 0.1;
-      seed[i * 2] = Math.random();
-      seed[i * 2 + 1] = 0.012 + Math.random() * 0.028;
-    }
-    this.particleBuffer = buffer(pos);
-    this.particleSeedBuffer = buffer(seed);
-    this.particleCount = n;
-
-    this.washBuffer = buffer(new Float32Array([-1, -1, 3, -1, -1, 3]));
 
     gl.depthFunc(gl.LEQUAL);
     gl.depthMask(false);
@@ -610,32 +576,22 @@ export default class Face3D {
 
     this._blink = blink;
 
-    // The wash sits behind everything and ignores depth entirely.
+    // No background of its own: the stage behind this canvas is the same in
+    // RINGS and in FACE, and the ambient particle field runs across the whole
+    // screen. Switching mode changes the visualiser and nothing else.
     gl.disable(gl.DEPTH_TEST);
-    this._wash(gl, energy, aspect);
 
     // Nearest surface into the depth buffer, then the additive colour pass
     // on top of it, so nothing inside the head shines through the face.
     this._depthPrepass(gl);
     this._bust(gl, energy, blink);
 
-    // Curves, particles and irises are meant to read through the surface.
+    // Curves and irises are meant to read through the surface.
     gl.disable(gl.DEPTH_TEST);
     this._featureCurves(gl, energy, blink);
     this._points(gl, energy, blink, canvas.height);
   }
 
-  _wash(gl, energy, aspect) {
-    const p = this.washProgram;
-    gl.useProgram(p.handle);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.washBuffer);
-    gl.enableVertexAttribArray(p.a.aPos);
-    gl.vertexAttribPointer(p.a.aPos, 2, gl.FLOAT, false, 0, 0);
-    gl.uniform1f(p.u.uEnergy, energy);
-    gl.uniform1f(p.u.uAspect, aspect);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.disableVertexAttribArray(p.a.aPos);
-  }
 
   _bust(gl, energy, blink) {
     const p = this.bustProgram;
@@ -851,17 +807,9 @@ export default class Face3D {
       gl.vertexAttribPointer(p.a.aSeed, 2, gl.FLOAT, false, 0, 0);
     };
 
-    // Particles.
-    gl.uniform1f(p.u.uDrift, 1);
-    gl.uniform1f(p.u.uSoft, 0);
-    gl.uniform3f(p.u.uColour, 0.30 + energy * 0.25, 0.80, 0.92);
-    bind(this.particleBuffer, this.particleSeedBuffer);
-    const particles = this.quality >= 2 ? this.particleCount
-      : this.quality === 1 ? Math.round(this.particleCount * 0.5)
-      : 0;
-    if (particles) gl.drawArrays(gl.POINTS, 0, particles);
-
-    // Irises — they dim as the lids come down.
+    // Irises — they dim as the lids come down. They are part of the face,
+    // not of the background, so they stay; the drifting motes that used to
+    // be drawn here were FACE's own and are now the shared ambient field.
     const open = 1 - blink;
     if (open > 0.05) {
       gl.uniform1f(p.u.uDrift, 0);

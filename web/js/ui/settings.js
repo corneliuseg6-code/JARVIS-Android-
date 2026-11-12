@@ -17,14 +17,20 @@ export default class Settings {
     this.onLanguageChange = onLanguageChange;
     this.onConfigChange = onConfigChange;
     this.voices = null;
+    this.voicesError = '';
     this.pollers = new Map();
   }
 
   async refresh() {
     try {
       this.voices = await api.voices();
-    } catch {
-      this.voices = null;
+      this.voicesError = '';
+    } catch (err) {
+      // Keep whatever was loaded last and remember why this attempt failed.
+      // Discarding it was how the engine line came to read "—" with no
+      // explanation after a single slow request, on a phone where the engine
+      // was in fact installed and working.
+      this.voicesError = String(err?.message || err || 'request failed');
     }
     try {
       this.llm = await api.llmStatus();
@@ -61,6 +67,7 @@ export default class Settings {
     this.host.append(
       this._interfaceGroup(cfg),
       this._assistantGroup(cfg),
+      this._shortcutsGroup(cfg),
       this._brainGroup(cfg),
       this._voiceGroup(cfg),
       this._modelsGroup(cfg),
@@ -105,6 +112,53 @@ export default class Settings {
       this._save({ reduced_motion: checked })));
     group.appendChild(this._switch(t('settings.magnifier'), cfg.magnifier_enabled !== false, (checked) =>
       this._save({ magnifier_enabled: checked })));
+    return group;
+  }
+
+  /**
+   * The two shortcuts on the top bar that are yours.
+   *
+   * OpenAI and GitHub are fixed; these two take any name and any http(s)
+   * address. A bad address is rejected by the backend and the slot goes back
+   * to its "+" state, so a typo never leaves a link pointing nowhere.
+   */
+  _shortcutsGroup(cfg) {
+    const group = this._group(t('settings.shortcuts'));
+    for (const n of [1, 2]) {
+      const name = document.createElement('input');
+      name.type = 'text';
+      name.maxLength = 18;
+      name.placeholder = t('sc.custom', { n });
+      name.value = cfg[`shortcut${n}_name`] || '';
+      name.addEventListener('change', () =>
+        this._save({ [`shortcut${n}_name`]: name.value.trim() }));
+      group.appendChild(this._field(t('settings.shortcutName', { n }), name));
+
+      const url = document.createElement('input');
+      url.type = 'url';
+      url.inputMode = 'url';
+      url.spellcheck = false;
+      url.placeholder = 'https://…';
+      url.value = cfg[`shortcut${n}_url`] || '';
+      url.addEventListener('change', async () => {
+        const typed = url.value.trim();
+        const next = await this._save({ [`shortcut${n}_url`]: typed });
+        // The backend drops anything that is not http(s); if it did, say so
+        // rather than leaving the box looking accepted.
+        if (typed && next && !next[`shortcut${n}_url`]) {
+          url.value = '';
+          toast(t('settings.shortcutBadUrl'), 'error', 5000);
+        }
+      });
+      const field = this._field(t('settings.shortcutUrl', { n }), url);
+      if (n === 2) {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = t('settings.shortcutHint');
+        field.appendChild(hint);
+      }
+      group.appendChild(field);
+    }
     return group;
   }
 
@@ -282,7 +336,57 @@ export default class Settings {
     windowField.appendChild(windowHint);
     group.appendChild(windowField);
 
+    group.appendChild(this._numberField({
+      label: t('settings.charBudget'), hint: t('settings.charBudgetHint'),
+      value: cfg.chat_char_budget ?? 6000, min: 500, max: 200000, step: 500,
+      key: 'chat_char_budget',
+    }));
+
+    // Ollama's own speed knobs. They do nothing on the paid providers, so
+    // they sit together and say which model they apply to.
+    group.appendChild(this._numberField({
+      label: t('settings.numCtx'), hint: t('settings.numCtxHint'),
+      value: cfg.ollama_num_ctx ?? 0, min: 0, max: 131072, step: 512,
+      key: 'ollama_num_ctx',
+    }));
+    group.appendChild(this._numberField({
+      label: t('settings.numPredict'), hint: t('settings.numPredictHint'),
+      value: cfg.ollama_num_predict ?? -1, min: -1, max: 8192, step: 64,
+      key: 'ollama_num_predict',
+    }));
+
+    const keep = document.createElement('input');
+    keep.type = 'text';
+    keep.value = cfg.ollama_keep_alive || '30m';
+    keep.addEventListener('change', () =>
+      this._save({ ollama_keep_alive: keep.value.trim() }));
+    const keepField = this._field(t('settings.keepAlive'), keep);
+    const keepHint = document.createElement('span');
+    keepHint.className = 'hint';
+    keepHint.textContent = t('settings.keepAliveHint');
+    keepField.appendChild(keepHint);
+    group.appendChild(keepField);
+
     return group;
+  }
+
+  /** A numeric setting with its explanation underneath. */
+  _numberField({ label, hint, value, min, max, step, key }) {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    input.addEventListener('change', () => this._save({ [key]: Number(input.value) }));
+    const field = this._field(label, input);
+    if (hint) {
+      const note = document.createElement('span');
+      note.className = 'hint';
+      note.textContent = hint;
+      field.appendChild(note);
+    }
+    return field;
   }
 
   _voiceGroup(cfg) {
@@ -291,71 +395,262 @@ export default class Settings {
     group.appendChild(this._switch(t('settings.ttsEnabled'), cfg.tts_enabled !== false, (checked) =>
       this._save({ tts_enabled: checked })));
 
-    const engine = this.voices?.engine;
-    const engineLine = document.createElement('div');
-    engineLine.className = 'conn-meta';
-    engineLine.textContent = engine
-      ? `${t('settings.voiceEngine')}: sherpa-onnx ${engine.version || '—'}${engine.available ? '' : ' · ' + (engine.error || '')}${engine.note ? ' · ' + engine.note : ''}`
-      : `${t('settings.voiceEngine')}: —`;
-    group.appendChild(engineLine);
+    group.appendChild(this._engineLine());
 
+    const byLanguage = this.voices?.by_language || {};
     const catalog = this.voices?.catalog || {};
     for (const lang of LANGUAGES) {
-      const entries = catalog[lang.code] || [];
-      const row = document.createElement('div');
-      row.className = 'voice-row';
-
-      const tag = document.createElement('span');
-      tag.className = 'voice-lang';
-      tag.textContent = lang.short;
-
-      const select = document.createElement('select');
-      const auto = document.createElement('option');
-      auto.value = '';
-      auto.textContent = t('settings.voiceAuto');
-      select.appendChild(auto);
-      for (const voice of entries) {
-        const option = document.createElement('option');
-        option.value = voice.id;
-        option.textContent = `${voice.label} (${voice.quality || '—'})`;
-        option.selected = (cfg.voice_by_language || {})[lang.code] === voice.id;
-        select.appendChild(option);
-      }
-      select.addEventListener('change', async () => {
-        await this._save({ voice_by_language: { [lang.code]: select.value } });
-      });
-
-      // With "Automatic" selected, the badge must describe the voice that would
-      // actually be used — the first installed one — not the first in the list.
-      const current = entries.find((v) => v.id === select.value)
-        || entries.find((v) => v.installed)
-        || entries[0];
-      const badge = document.createElement('span');
-      badge.className = 'badge ' + (current?.installed ? 'badge-ok' : 'badge-missing');
-      badge.textContent = current?.installed ? t('settings.voiceInstalled') : t('settings.voiceMissing');
-
-      row.append(tag, select, badge);
-
-      if (current && !current.installed) {
-        const download = document.createElement('button');
-        download.type = 'button';
-        download.className = 'btn btn-sm btn-ghost';
-        download.textContent = t('settings.download');
-        download.addEventListener('click', () => this._download(current, download, badge));
-        row.appendChild(download);
-      }
-      group.appendChild(row);
+      // by_language includes voices that are installed but not catalogued —
+      // a model kept from an older install is selectable, not just tolerated.
+      const entries = byLanguage[lang.code]?.voices || catalog[lang.code] || [];
+      const genders = byLanguage[lang.code]?.genders || {};
+      group.appendChild(this._voiceRow(cfg, lang, entries, genders));
     }
 
+    group.appendChild(this._speedField(cfg));
+
+    // The device's own voice, off by default and clearly labelled as not
+    // being JARVIS's.
+    group.appendChild(this._switch(
+      t('settings.deviceVoice'), cfg.tts_browser_fallback === true,
+      (checked) => this._save({ tts_browser_fallback: checked }),
+    ));
+    const note = document.createElement('div');
+    note.className = 'hint';
+    note.textContent = t('settings.deviceVoiceHint');
+    group.appendChild(note);
+
+    group.appendChild(this._voiceDiagnostics());
+    return group;
+  }
+
+  /**
+   * What the speech engine is actually doing.
+   *
+   * Never a bare "—": either the engine's own report, or the reason the
+   * report could not be fetched. A dash with no explanation sent the user
+   * looking for a broken install that was not broken.
+   */
+  _engineLine() {
+    const line = document.createElement('div');
+    line.className = 'conn-meta';
+    line.id = 'voice-engine-line';
+    const engine = this.voices?.engine;
+    const label = t('settings.voiceEngine');
+    if (!engine) {
+      line.textContent = `${label}: ${this.voicesError
+        ? t('settings.voiceEngineUnreachable', { detail: this.voicesError.slice(0, 90) })
+        : t('settings.voiceEngineChecking')}`;
+      return line;
+    }
+    // When the engine is not there at all, its version is meaningless —
+    // saying "sherpa-onnx version unknown · not importable" reads as two
+    // separate faults instead of one.
+    const parts = engine.available
+      ? [`sherpa-onnx ${engine.version || t('settings.voiceEngineNoVersion')}`]
+      : [`sherpa-onnx: ${engine.error || t('settings.voiceEngineMissing')}`];
+    if (engine.note) parts.push(engine.note);
+    if (this.voicesError) parts.push(t('settings.voiceEngineStale'));
+    line.textContent = `${label}: ${parts.join(' · ')}`;
+    return line;
+  }
+
+  /** One language: gender, voice, status, preview. */
+  _voiceRow(cfg, lang, entries, genders) {
+    const row = document.createElement('div');
+    row.className = 'voice-row';
+
+    const tag = document.createElement('span');
+    tag.className = 'voice-lang';
+    tag.textContent = lang.short;
+    row.appendChild(tag);
+
+    const installed = entries.filter((v) => v.installed);
+    const has = (gender) => installed.some((v) => (v.gender || '') === gender);
+
+    // Male / female, offered only where a voice of that gender is actually
+    // installed. An option that cannot be honoured is worse than no option.
+    const genderSelect = document.createElement('select');
+    genderSelect.className = 'voice-gender';
+    genderSelect.dataset.lang = lang.code;
+    const current = (cfg.voice_gender_by_language || {})[lang.code] || '';
+    for (const [value, key] of [['', 'settings.genderAny'],
+                                ['male', 'settings.genderMale'],
+                                ['female', 'settings.genderFemale']]) {
+      if (value && !has(value)) continue;
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = t(key);
+      option.selected = current === value;
+      genderSelect.appendChild(option);
+    }
+    genderSelect.addEventListener('change', () =>
+      this._save({ voice_gender_by_language: { [lang.code]: genderSelect.value } })
+        .then(() => this.refresh()));
+    row.appendChild(genderSelect);
+
+    const select = document.createElement('select');
+    select.className = 'voice-pick';
+    select.dataset.lang = lang.code;
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = t('settings.voiceAuto');
+    select.appendChild(auto);
+    for (const voice of entries) {
+      const option = document.createElement('option');
+      option.value = voice.id;
+      const gender = voice.gender
+        ? t(voice.gender === 'male' ? 'settings.genderMale' : 'settings.genderFemale')
+        : '';
+      option.textContent = [voice.label, gender, voice.quality].filter(Boolean).join(' · ');
+      option.selected = (cfg.voice_by_language || {})[lang.code] === voice.id;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () =>
+      this._save({ voice_by_language: { [lang.code]: select.value } }).then(() => this.refresh()));
+    row.appendChild(select);
+
+    // The badge must describe the voice that would actually be used, which
+    // with "Automatic" is the first installed one, not the first listed.
+    const chosen = entries.find((v) => v.id === select.value)
+      || installed.find((v) => !current || (v.gender || '') === current)
+      || installed[0]
+      || entries[0];
+
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + (chosen?.installed ? 'badge-ok' : 'badge-missing');
+    badge.textContent = chosen?.installed
+      ? t('settings.voiceInstalled') : t('settings.voiceMissing');
+    row.appendChild(badge);
+
+    if (chosen?.installed) {
+      const preview = document.createElement('button');
+      preview.type = 'button';
+      preview.className = 'btn btn-sm btn-ghost';
+      preview.dataset.act = 'preview';
+      preview.dataset.lang = lang.code;
+      preview.textContent = t('settings.preview');
+      preview.addEventListener('click', () => this._preview(lang.code, chosen.id, preview));
+      row.appendChild(preview);
+    } else if (chosen) {
+      const download = document.createElement('button');
+      download.type = 'button';
+      download.className = 'btn btn-sm btn-ghost';
+      download.textContent = t('settings.download');
+      download.addEventListener('click', () => this._download(chosen, download, badge));
+      row.appendChild(download);
+    }
+
+    // When only one gender exists for a language, say so rather than leaving
+    // the missing option unexplained.
+    const kinds = Object.keys(genders).filter((g) => g !== 'unknown');
+    if (installed.length && kinds.length === 1) {
+      const only = document.createElement('span');
+      only.className = 'hint voice-only';
+      only.textContent = t('settings.genderOnly', {
+        gender: t(kinds[0] === 'male' ? 'settings.genderMale' : 'settings.genderFemale'),
+      });
+      row.appendChild(only);
+    }
+    return row;
+  }
+
+  /** Speech rate, with the value shown and audible before it is saved. */
+  _speedField(cfg) {
     const speed = document.createElement('input');
     speed.type = 'range';
-    speed.min = '0.6';
+    speed.id = 'tts-speed';
+    // Down to 0.4: the old 0.6 floor was not slow enough to follow a long
+    // answer in a second language, which is what this slider is for.
+    speed.min = '0.4';
     speed.max = '1.6';
-    speed.step = '0.1';
+    speed.step = '0.05';
     speed.value = String(cfg.tts_speed || 1);
-    speed.addEventListener('change', () => this._save({ tts_speed: Number(speed.value) }));
-    group.appendChild(this._field(t('settings.speed'), speed));
-    return group;
+
+    const field = this._field(t('settings.speed'), speed);
+    const readout = document.createElement('span');
+    readout.className = 'hint';
+    readout.id = 'tts-speed-value';
+    const show = () => {
+      const value = Number(speed.value);
+      readout.textContent = t('settings.speedValue', { value: value.toFixed(2) })
+        + (value <= 0.6 ? ' · ' + t('settings.speedSlow') : '');
+    };
+    show();
+    speed.addEventListener('input', show);
+    speed.addEventListener('change', () => {
+      show();
+      this._save({ tts_speed: Number(speed.value) });
+    });
+    field.appendChild(readout);
+    return field;
+  }
+
+  /**
+   * What is on disk, and where JARVIS looked.
+   *
+   * A voice reported as missing that the user installed themselves cannot be
+   * diagnosed from a phone without this.
+   */
+  _voiceDiagnostics() {
+    const wrap = document.createElement('details');
+    wrap.className = 'voice-diag';
+    const summary = document.createElement('summary');
+    summary.textContent = t('settings.voiceDiagnostics');
+    wrap.appendChild(summary);
+
+    const diag = this.voices?.diagnostics;
+    const body = document.createElement('div');
+    body.className = 'hint';
+    if (!diag) {
+      body.textContent = this.voicesError || t('settings.voiceEngineChecking');
+      wrap.appendChild(body);
+      return wrap;
+    }
+    const lines = [t('settings.voiceFolder', { path: diag.root })];
+    if (!diag.voices.length) {
+      lines.push(t('settings.voiceNoneFound'));
+    } else {
+      for (const voice of diag.voices) {
+        lines.push(`${voice.id} — ${voice.path} (${voice.size_mb} MB)`);
+      }
+    }
+    for (const bad of diag.unusable || []) {
+      lines.push(`${bad.path} — ${bad.problem}`);
+    }
+    body.textContent = lines.join('\n');
+    body.style.whiteSpace = 'pre-wrap';
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  /** Speak a sample in the voice and at the rate currently selected. */
+  async _preview(language, voice, button) {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = t('settings.previewPlaying');
+    const speed = Number(document.getElementById('tts-speed')?.value) || undefined;
+    let url = '';
+    try {
+      const response = await api.ttsPreview(t('settings.previewText'), language, voice, speed);
+      const blob = await response.blob();
+      url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      await new Promise((resolve) => {
+        audio.onended = resolve;
+        audio.onerror = resolve;
+        audio.play().catch(resolve);
+      });
+    } catch (err) {
+      // Say which voice failed and why; never fall back to another one.
+      toast(t('settings.previewFailed', {
+        voice, detail: String(err?.message || err).slice(0, 120),
+      }), 'error', 6000);
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+      button.disabled = false;
+      button.textContent = label;
+    }
   }
 
   /** Voice downloads are always an explicit, confirmed, per-voice action. */

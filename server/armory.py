@@ -10,9 +10,11 @@ Design rules enforced here:
 from __future__ import annotations
 
 import shlex
+import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from . import config, paths, store
@@ -260,6 +262,49 @@ def autoconnect_all() -> None:
     for conn in _load():
         if conn.get("autoconnect") and conn.get("enabled", True):
             threading.Thread(target=connect, args=(conn["id"],), daemon=True).start()
+
+
+def bundled_presets() -> list[dict[str, Any]]:
+    """
+    The MCP servers that ship with JARVIS, ready to add in one tap.
+
+    The command is built from the real project root rather than a documented
+    example, because the path differs with wherever JARVIS was unpacked and is
+    miserable to type on a phone keyboard. Only servers actually present on
+    disk are offered — a preset that cannot start is worse than none.
+    """
+    tools_dir = paths.PROJECT_ROOT / "tools"
+    candidates = [
+        {
+            "id": "files",
+            "name": "JARVIS Files",
+            "script": "fs_mcp_server.py",
+            "args": [str(Path.home())],
+            "summary": "Read and write files under one folder you choose.",
+        },
+        {
+            "id": "web",
+            "name": "JARVIS Web",
+            "script": "web_mcp_server.py",
+            "args": [],
+            "summary": "Search the web, read public pages, download files.",
+        },
+    ]
+    out: list[dict[str, Any]] = []
+    for item in candidates:
+        script = tools_dir / str(item["script"])
+        if not script.is_file():
+            continue
+        command = " ".join([sys.executable or "python3", shlex.quote(str(script)),
+                            *(shlex.quote(a) for a in item["args"])])
+        out.append({
+            "id": item["id"],
+            "name": item["name"],
+            "summary": item["summary"],
+            "transport": "stdio",
+            "command": command,
+        })
+    return out
 
 
 def all_tools() -> list[dict[str, Any]]:

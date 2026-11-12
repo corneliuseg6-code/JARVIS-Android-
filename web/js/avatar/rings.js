@@ -5,6 +5,11 @@
  * speed and direction, so the whole thing reads as machinery rather than as a
  * spinning circle:
  *
+ * There is deliberately no background layer. The dial used to sit on a soft
+ * disc of radius R * 1.25 — wider than the canvas's half-size of R * 1.087 —
+ * so the glow was clipped by the canvas edge and read as a square box behind
+ * the rings. The rings now sit straight on the interface background.
+ *
  *   1  outer tick crown      fine radial graduations, every 5th one long
  *   2  segment ring          four bright arcs with gaps, slow clockwise
  *   3  dense graduation ring counter-clockwise, brightness varies with energy
@@ -91,8 +96,6 @@ export default class RingsAvatar {
 
     const p = this.phase;
 
-    this._ambient(ctx, R, energy);
-
     // 1 — outer tick crown
     this._tickRing(ctx, {
       radius: R * 0.98, count: 120, length: R * 0.055, longEvery: 5,
@@ -157,16 +160,6 @@ export default class RingsAvatar {
   // ------------------------------------------------------------------ layers
 
   /** Wide, very soft wash behind everything so the dial sits in its own light. */
-  _ambient(ctx, R, energy) {
-    const g = ctx.createRadialGradient(0, 0, R * 0.05, 0, 0, R * 1.25);
-    g.addColorStop(0, `rgba(42, 150, 160, ${0.16 + energy * 0.12})`);
-    g.addColorStop(0.55, 'rgba(22, 92, 120, 0.07)');
-    g.addColorStop(1, 'rgba(6, 20, 38, 0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(0, 0, R * 1.25, 0, TAU);
-    ctx.fill();
-  }
 
   /**
    * A crown of radial graduations. Short ticks go in one batched path, long

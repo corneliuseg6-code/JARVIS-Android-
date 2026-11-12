@@ -6,9 +6,10 @@
  * the whole page dying at the first error (the classic "buttons do nothing"
  * symptom).
  *
- * The shell is: top bar, status strip, visualiser, HUD, chat dock — with the
- * navigation as a drawer and the panels as a sheet, so neither can steal
- * vertical space from the visualiser.
+ * The shell is: top bar, the console band (rings between a status rail and a
+ * control rail, hologram in the corner), the conversation, and the chat bar —
+ * with the navigation as a drawer and the panels as a sheet, so neither can
+ * steal space from the other two.
  */
 import { api } from './core/api.js';
 import * as state from './core/state.js';
@@ -23,20 +24,34 @@ import Power from './ui/power.js';
 import Magnifier from './ui/magnifier.js';
 import Status from './ui/status.js';
 import Chat from './ui/chat.js';
-import DockVideo from './ui/dock-video.js';
 import Armory from './ui/armory.js';
 import Eyes from './ui/eyes.js';
+import Connections from './ui/connections.js';
+import Fullscreen from './ui/fullscreen.js';
+import Shortcuts from './ui/shortcuts.js';
+import Clock from './ui/clock.js';
+import Backdrop from './ui/backdrop.js';
 import Modes from './ui/modes.js';
+import Folders from './ui/folders.js';
+import LoopVideo from './ui/loop-video.js';
 import Settings from './ui/settings.js';
 import { toast } from './ui/toast.js';
+
+// The live module instances, reachable from the console. Handy when
+// something looks wrong on the phone and there is no debugger attached, and
+// it is what lets a test assert against the real objects rather than
+// re-deriving their state from the DOM.
+window.__jarvis = undefined;
 
 const app = {
   avatar: null, mic: null, voice: null, power: null, magnifier: null,
   status: null, chat: null, armory: null, eyes: null, modes: null, settings: null,
+  connections: null, fullscreen: null, shortcuts: null, clock: null,
+  backdrop: null,
 };
 
 const root = document.getElementById('app');
-const SHEET_VIEWS = ['armory', 'eyes', 'settings'];
+const SHEET_VIEWS = ['armory', 'eyes', 'connections', 'settings'];
 
 function guard(name, fn) {
   try {
@@ -50,9 +65,26 @@ function guard(name, fn) {
 }
 
 // ---------------------------------------------------------------- activity
+/**
+ * The edge pulse reports what JARVIS is doing.
+ *
+ * Green while it is listening, thinking or speaking; red while it is standing
+ * by or in standby. It reads the same two pieces of state the activity pill
+ * does, from the same function, so the border and the pill can never tell you
+ * different things.
+ */
+function applyEdgeState() {
+  const edge = document.getElementById('edge');
+  if (!edge) return;
+  const busy = state.get('power') !== 'standby'
+    && ['listening', 'thinking', 'speaking'].includes(state.get('activity'));
+  edge.dataset.state = busy ? 'busy' : 'rest';
+}
+
 function setActivity(activity) {
   state.set({ activity });
   root?.setAttribute('data-activity', activity);
+  applyEdgeState();
   app.avatar?.setActivity(activity);
   const label = document.getElementById('activity-label');
   if (label) {
@@ -72,14 +104,6 @@ function setNav(open) {
   if (toggle) toggle.setAttribute('aria-expanded', String(open));
   // The scrim covers the drawer and the sheet alike.
   if (scrim) scrim.hidden = !open && !SHEET_VIEWS.includes(state.get('view'));
-}
-
-function setDock(expanded) {
-  root?.setAttribute('data-dock', expanded ? 'expanded' : 'collapsed');
-  document.getElementById('btn-dock')?.setAttribute('aria-expanded', String(expanded));
-  state.set({ dockOpen: expanded });
-  app.dockVideo?.setOpen(expanded);
-  requestAnimationFrame(() => app.avatar?.resize());
 }
 
 /** 'home' shows the visualiser alone; the rest open the bottom sheet. */
@@ -113,6 +137,10 @@ function setView(view) {
   }
   if (view === 'armory') app.armory?.refresh();
   if (view === 'settings') app.settings?.refresh();
+  if (view === 'connections') app.connections?.refresh();
+  // The connections panel polls while a Claude Code run is in flight; leaving
+  // the panel stops it rather than letting it run behind a closed sheet.
+  if (view !== 'connections') app.connections?.stop();
 
   requestAnimationFrame(() => app.avatar?.resize());
 }
@@ -131,7 +159,6 @@ function setImmersive(on) {
   if (exit) exit.hidden = !on;
   if (on) {
     setNav(false);
-    setDock(false);
     if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
   }
   // Follow the rows while they fold, so the canvas grows with the stage
@@ -187,6 +214,9 @@ function trackViewport() {
       ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
       : 0;
     document.documentElement.style.setProperty('--kb', keyboard + 'px');
+    // The console sheds the hologram while the keyboard is up, so the
+    // conversation does not shrink to a couple of lines.
+    root?.setAttribute('data-kb', keyboard > 120 ? 'on' : 'off');
     app.avatar?.resize();
   };
   vv.addEventListener('resize', apply);
@@ -216,6 +246,10 @@ function applyLanguage(code, { persist = false } = {}) {
   app.mic?.render();
   app.power?.render();
   app.armory?.render();
+  app.connections?.render();
+  app.fullscreen?.render();
+  app.shortcuts?.render();
+  app.clock?.setLanguage(code);
   app.modes?.render();
   app.settings?.render();
   app.voice?.resetWarnings();
@@ -253,10 +287,12 @@ function applyAvatarMode(mode, { persist = false } = {}) {
   document.querySelectorAll('.mode-btn').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.mode === applied);
   });
-  const tag = document.getElementById('stage-tag');
-  if (tag) tag.textContent = applied.toUpperCase();
+  // The dial no longer carries a "RINGS"/"FACE" caption: the RINGS/FACE bar
+  // directly beneath it already says which one is showing, and the label was
+  // the only text sitting on the artwork.
   state.set({ avatarMode: applied });
   state.saveLocal({ avatarMode: applied });
+  app.faceVideo?.setOpen(applied === 'face');
   if (persist) {
     api.setConfig({ avatar_mode: applied })
       .then((config) => state.set({ config }))
@@ -264,10 +300,62 @@ function applyAvatarMode(mode, { persist = false } = {}) {
   }
 }
 
+/**
+ * The conversation's video plays only while the panel is open on CHAT and
+ * the screen is not immersive. Those states are owned by chat.js and
+ * setImmersive, which publish them as attributes; watching the attributes
+ * keeps this feature out of their code entirely.
+ */
+function watchChatVideo() {
+  const folders = document.getElementById('folders-panel');
+  const sync = () => {
+    const showing = root?.getAttribute('data-chat') !== 'collapsed'
+      && root?.getAttribute('data-immersive') !== 'on'
+      && (!folders || folders.hidden);
+    root?.setAttribute('data-chat-bg', showing ? 'on' : 'off');
+    app.chatVideo?.setOpen(showing);
+  };
+  if (root) {
+    new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-chat', 'data-immersive'] });
+  }
+  if (folders) new MutationObserver(sync).observe(folders, { attributes: true, attributeFilter: ['hidden'] });
+  sync();
+}
+
+/**
+ * The corner card's face plays only while the card is actually on screen: it
+ * is hidden when the keyboard is up, on short screens and in immersive mode.
+ * An IntersectionObserver reports display:none as not intersecting, which
+ * covers the first two; immersive only fades the card, so it is watched too.
+ */
+function watchCardVideo() {
+  const card = document.getElementById('avatar-card');
+  if (!card || !app.cardVideo) return;
+  let onScreen = false;
+  const sync = () => {
+    app.cardVideo.setOpen(onScreen && !card.hidden && root?.getAttribute('data-immersive') !== 'on');
+  };
+  if (typeof IntersectionObserver === 'function') {
+    new IntersectionObserver((entries) => {
+      onScreen = entries[entries.length - 1].isIntersecting;
+      sync();
+    }).observe(card);
+  } else {
+    onScreen = true;
+  }
+  if (root) new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-immersive'] });
+  new MutationObserver(sync).observe(card, { attributes: true, attributeFilter: ['hidden'] });
+  sync();
+}
+
 function applyMotion(reduced) {
   root?.setAttribute('data-motion', reduced ? 'reduced' : 'full');
   app.avatar?.setReducedMotion(reduced);
-  app.dockVideo?.setReducedMotion(reduced);
+  app.backdrop?.setReducedMotion(reduced);
+  app.chatVideo?.setReducedMotion(reduced);
+  app.faceVideo?.setReducedMotion(reduced);
+  app.cardVideo?.setReducedMotion(reduced);
+  document.getElementById('edge')?.classList.toggle('is-still', !!reduced);
 }
 
 // ---------------------------------------------------------------- boot
@@ -288,12 +376,26 @@ async function boot() {
   applyLanguage(language);
   applyTranslations();
 
-  // 2. avatar (and the messages-panel backdrop, before applyMotion reaches it)
-  app.dockVideo = guard('dockVideo', () => new DockVideo(document.getElementById('dock-video')));
+  // 2. avatar (and the conversation's video, before applyMotion reaches it)
+  app.chatVideo = guard('chatVideo', () => new LoopVideo(
+    document.getElementById('chat-video'), { src: '/media/chat-bg.mp4' },
+  ));
+  // FACE is a looping video over a still of the same face. The still shows
+  // while the video loads, if it cannot play, and whenever it is paused.
+  app.faceVideo = guard('faceVideo', () => new LoopVideo(
+    document.getElementById('face-video'), { src: '/media/face-loop.mp4', reducedFrame: false },
+  ));
+  // The corner card shows the same face in miniature, from its own small
+  // copy of the loop so the phone is never decoding the large one twice.
+  app.cardVideo = guard('cardVideo', () => new LoopVideo(
+    document.getElementById('card-video'), { src: '/media/face-card.mp4', reducedFrame: false },
+  ));
   app.avatar = guard('avatar', () => new Avatar(
     document.getElementById('avatar-canvas'),
     document.getElementById('avatar-gl'),
     document.getElementById('avatar-card-gl'),
+    document.getElementById('face-media'),
+    document.getElementById('card-face'),
   ));
   app.avatar?.start();
   applyAvatarMode((config && config.avatar_mode) || local.avatarMode || 'rings');
@@ -319,13 +421,26 @@ async function boot() {
   app.chat = guard('chat', () => new Chat({
     voice: app.voice,
     onActivity: setActivity,
-    onSend: () => setDock(true),
-    onReply: (text) => {
-      const ticker = document.getElementById('dock-ticker');
-      if (ticker) ticker.textContent = text || '';
+  }));
+  // The folder network. Built after the chat so it can be handed to the
+  // panel that shows it, and left stopped until the FOLDERS tab is opened —
+  // an animation nobody is looking at is a battery leak.
+  app.folders = guard('folders', () => new Folders({
+    onOpenFile: (path) => app.chat?.openWorkspaceFile?.(path),
+  }));
+  if (app.chat && app.folders) {
+    app.chat.attachFolders(app.folders);
+    app.folders.stop();
+  }
+  window.__jarvis = app;
+  app.armory = guard('armory', () => new Armory());
+  app.connections = guard('connections', () => new Connections({
+    onConfigChange: (next) => {
+      state.set({ config: next });
+      app.status?.refresh();
+      app.settings?.refresh?.();
     },
   }));
-  app.armory = guard('armory', () => new Armory());
   app.settings = guard('settings', () => new Settings({
     onLanguageChange: (code) => applyLanguage(code),
     onConfigChange: (next) => {
@@ -336,8 +451,29 @@ async function boot() {
       app.mic?.refreshLanguage();
       app.voice?.resetWarnings();
       app.modes?.render();
+      app.shortcuts?.render();
     },
   }));
+  // Ambient layers: the suspended particles and the travelling edge pulse
+  // belong to every mode, so they start here rather than with full screen.
+  app.backdrop = guard('backdrop', () => new Backdrop(
+    document.getElementById('backdrop-canvas'),
+  ));
+  // The conversation is never painted into: it is a panel in its own right,
+  // and motes behind it would still show at its edges.
+  app.backdrop?.maskOut(['.chat-panel', '.dock']);
+  app.backdrop?.start();
+  // One watchdog for the whole screen: when the dial drops a quality level
+  // because frames are slipping, the particle field sheds motes with it.
+  if (app.avatar) app.avatar.onQuality = (level) => app.backdrop?.setQuality(level);
+  app.fullscreen = guard('fullscreen', () => new Fullscreen());
+  app.fullscreen?.setBackdrop(app.backdrop);
+  app.shortcuts = guard('shortcuts', () => new Shortcuts({
+    // An unconfigured slot is not a dead button: it opens the place where
+    // you give it a name and an address.
+    onConfigure: () => setView('settings'),
+  }));
+  app.clock = guard('clock', () => new Clock({ language }));
   app.magnifier = guard('magnifier', () => new Magnifier());
   app.magnifier?.setVisible(!config || config.magnifier_enabled !== false);
 
@@ -378,11 +514,6 @@ async function boot() {
     button.addEventListener('click', () => applyAvatarMode(button.dataset.mode, { persist: true }));
   });
 
-  document.getElementById('btn-dock')?.addEventListener('click', () => {
-    setDock(root?.getAttribute('data-dock') !== 'expanded');
-  });
-  document.getElementById('chat-input')?.addEventListener('focus', () => setDock(true));
-
   document.getElementById('btn-exit')?.addEventListener('click', onExit);
 
   wireStageTap();
@@ -397,20 +528,25 @@ async function boot() {
     if (state.get('immersive')) setImmersive(false);
     else if (root?.getAttribute('data-nav') === 'open') setNav(false);
     else if (SHEET_VIEWS.includes(state.get('view'))) setView('home');
-    else if (root?.getAttribute('data-dock') === 'expanded') setDock(false);
   });
 
   on('power:standby', () => {
+    applyEdgeState();
     app.modes?.stopAll('standby');
     setNote('');
     setActivity('idle');
     app.status?.schedule();
-    app.dockVideo?.setStandby(true);
+    app.chatVideo?.setStandby(true);
+    app.faceVideo?.setStandby(true);
+    app.cardVideo?.setStandby(true);
   });
   on('power:active', () => {
+    applyEdgeState();
     setActivity('idle');
     app.status?.refresh();
-    app.dockVideo?.setStandby(false);
+    app.chatVideo?.setStandby(false);
+    app.faceVideo?.setStandby(false);
+    app.cardVideo?.setStandby(false);
   });
   on('mic:on', () => setActivity('listening'));
   on('mic:off', () => {
@@ -421,8 +557,9 @@ async function boot() {
   setActivity('idle');
   setView('home');
   setNav(false);
-  setDock(false);
   root?.setAttribute('data-immersive', 'off');
+  watchChatVideo();
+  watchCardVideo();
 
   const problems = missingKeys();
   if (Object.keys(problems).length) console.warn('[i18n] incomplete translations', problems);
@@ -471,6 +608,6 @@ boot().catch((err) => {
 
 // Exposed for debugging from the Chrome console on the phone.
 window.JARVIS = {
-  app, state, setView, setActivity, setDock, setNav, setImmersive,
+  app, state, setView, setActivity, setNav, setImmersive,
   applyLanguage, applyAvatarMode,
 };
